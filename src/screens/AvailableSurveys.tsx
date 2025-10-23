@@ -7,6 +7,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import SurveyDetailsModal from '../components/SurveyDetailsModal';
 import {
   Text,
   Card,
@@ -32,6 +33,8 @@ export default function AvailableSurveys({ navigation }: any) {
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedSurvey, setSelectedSurvey] = useState<any>(null);
 
   useEffect(() => {
     loadSurveys();
@@ -419,8 +422,8 @@ export default function AvailableSurveys({ navigation }: any) {
                   <Button
                     mode="outlined"
                     onPress={() => {
-                      // Navigate to survey details
-                      Alert.alert('Survey Details', `Survey: ${survey.surveyName}\n\nDescription: ${survey.description}\n\nMode: ${survey.mode.toUpperCase()}\nDuration: ${formatDuration(survey.estimatedDuration)}\nQuestions: ${survey.questions?.length || 0}`);
+                      setSelectedSurvey(survey);
+                      setShowDetailsModal(true);
                     }}
                     style={styles.detailsButton}
                     compact
@@ -472,6 +475,16 @@ export default function AvailableSurveys({ navigation }: any) {
       >
         {snackbarMessage}
       </Snackbar>
+
+      {/* Survey Details Modal */}
+      <SurveyDetailsModal
+        visible={showDetailsModal}
+        survey={selectedSurvey}
+        onClose={() => {
+          setShowDetailsModal(false);
+          setSelectedSurvey(null);
+        }}
+      />
     </View>
   );
 }
