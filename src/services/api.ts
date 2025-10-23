@@ -65,10 +65,15 @@ class ApiService {
   async verifyToken() {
     try {
       const headers = await this.getHeaders();
-      const response = await axios.get(`${this.baseURL}/api/auth/verify`, { headers });
+      // Use the /api/auth/me endpoint which should exist
+      const response = await axios.get(`${this.baseURL}/api/auth/me`, { 
+        headers,
+        timeout: 10000 // 10 second timeout
+      });
       return { success: true, user: response.data.user };
-    } catch (error) {
-      return { success: false };
+    } catch (error: any) {
+      console.error('Token verification error:', error);
+      return { success: false, error: error.message };
     }
   }
 
@@ -476,6 +481,22 @@ class ApiService {
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to upload audio',
+      };
+    }
+  }
+
+  // Get gender response counts for quota management
+  async getGenderResponseCounts(surveyId: string) {
+    try {
+      const headers = await this.getHeaders();
+      const response = await axios.get(`${this.baseURL}/api/survey-responses/survey/${surveyId}/gender-counts`, { headers });
+      return response.data;
+    } catch (error: any) {
+      console.error('Get gender response counts error:', error);
+      return {
+        success: false,
+        message: 'Failed to get gender response counts',
+        error: error.message
       };
     }
   }

@@ -17,18 +17,18 @@ import { apiService } from '../services/api';
 import { SurveyResponse } from '../types';
 
 interface InterviewDetailsProps {
-  route: {
-    params: {
-      interview: SurveyResponse;
+  route?: {
+    params?: {
+      interview?: SurveyResponse;
     };
   };
-  navigation: any;
+  navigation?: any;
 }
 
 const { width } = Dimensions.get('window');
 
 const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }) => {
-  const { interview } = route.params;
+  const interview = route?.params?.interview;
   const [isLoading, setIsLoading] = useState(false);
   const [detailedInterview, setDetailedInterview] = useState<SurveyResponse | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -36,7 +36,9 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
 
   useEffect(() => {
-    loadDetailedInterview();
+    if (interview) {
+      loadDetailedInterview();
+    }
     
     // Cleanup audio when component unmounts
     return () => {
@@ -44,7 +46,7 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
         sound.unloadAsync();
       }
     };
-  }, []);
+  }, [interview]);
 
   useEffect(() => {
     // Cleanup audio when component unmounts
@@ -56,6 +58,11 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
   }, [sound]);
 
   const loadDetailedInterview = async () => {
+    if (!interview) {
+      console.log('No interview data available');
+      return;
+    }
+    
     setIsLoading(true);
     try {
       const result = await apiService.getInterviewDetails(interview._id);
@@ -163,12 +170,32 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
     </View>
   );
 
+  if (!interview) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation?.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#1f2937" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Interview Details</Text>
+          <View style={styles.placeholder} />
+        </View>
+        <View style={styles.content}>
+          <Text style={styles.errorText}>No interview data available</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation?.goBack()}
         >
           <Ionicons name="arrow-back" size={24} color="#1f2937" />
         </TouchableOpacity>
@@ -682,6 +709,12 @@ const styles = StyleSheet.create({
   skippedText: {
     color: '#f59e0b',
     fontStyle: 'italic',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#dc2626',
+    textAlign: 'center',
+    marginTop: 50,
   },
 });
 

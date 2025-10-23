@@ -33,43 +33,131 @@ export default function App() {
 
   const checkAuthStatus = async () => {
     try {
+      console.log('Checking authentication status...');
       const token = await AsyncStorage.getItem('authToken');
       const userData = await AsyncStorage.getItem('userData');
       
+      console.log('Stored token exists:', !!token);
+      console.log('Stored user data exists:', !!userData);
+      
       if (token && userData) {
         const parsedUser = JSON.parse(userData);
+        console.log('Parsed user data:', parsedUser);
         
         // Verify token is still valid
         try {
+          console.log('Verifying token with server...');
           const response = await apiService.verifyToken();
+          console.log('Token verification response:', response);
+          
           if (response.success) {
+            console.log('Token is valid, user authenticated');
             setUser(parsedUser);
             setIsAuthenticated(true);
           } else {
+            console.log('Token is invalid, clearing storage');
             // Token invalid, clear storage
             await AsyncStorage.multiRemove(['authToken', 'userData']);
+            setUser(null);
+            setIsAuthenticated(false);
           }
         } catch (error) {
-          // Token verification failed, clear storage
-          await AsyncStorage.multiRemove(['authToken', 'userData']);
+          console.error('Token verification failed:', error);
+          
+          // Check if it's a network error
+          const errorMessage = (error as any)?.message || '';
+          const errorCode = (error as any)?.code || '';
+          const isNetworkError = errorMessage.includes('Network Error') || 
+                                errorMessage.includes('timeout') ||
+                                errorCode === 'NETWORK_ERROR';
+          
+          if (isNetworkError) {
+            console.log('Network error during token verification, allowing offline access');
+            // If it's a network error, allow the user to stay logged in
+            // This provides better UX when the user is offline
+            setUser(parsedUser);
+            setIsAuthenticated(true);
+          } else {
+            console.log('Non-network error, clearing storage');
+            // For other errors (like 401 Unauthorized), clear storage
+            await AsyncStorage.multiRemove(['authToken', 'userData']);
+            setUser(null);
+            setIsAuthenticated(false);
+          }
         }
+      } else {
+        console.log('No stored authentication data found');
+        setUser(null);
+        setIsAuthenticated(false);
       }
     } catch (error) {
       console.error('Auth check error:', error);
+      // On any error, clear storage and set as not authenticated
+      try {
+        await AsyncStorage.multiRemove(['authToken', 'userData']);
+      } catch (clearError) {
+        console.error('Error clearing storage:', clearError);
+      }
+      setUser(null);
+      setIsAuthenticated(false);
     } finally {
+      console.log('Auth check completed, setting loading to false');
       setIsLoading(false);
     }
   };
 
-  const handleLogin = (userData: any, token: string) => {
-    setUser(userData);
-    setIsAuthenticated(true);
+  const handleLogin = async (userData: any, token: string) => {
+    try {
+      console.log('Handling login with user data:', userData);
+      console.log('Handling login with token:', !!token);
+      
+      // Store the authentication data
+      await AsyncStorage.setItem('authToken', token);
+      await AsyncStorage.setItem('userData', JSON.stringify(userData));
+      
+      console.log('Authentication data stored successfully');
+      
+      // Update state
+      setUser(userData);
+      setIsAuthenticated(true);
+      
+      console.log('User authenticated successfully');
+    } catch (error) {
+      console.error('Error storing authentication data:', error);
+      // Even if storage fails, we can still set the user as authenticated for the current session
+      setUser(userData);
+      setIsAuthenticated(true);
+    }
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.multiRemove(['authToken', 'userData']);
-    setUser(null);
-    setIsAuthenticated(false);
+    try {
+      console.log('Logging out user...');
+      
+      // Call the logout API to invalidate the token on the server
+      try {
+        await apiService.logout();
+        console.log('Server logout successful');
+      } catch (error) {
+        console.error('Server logout failed:', error);
+        // Continue with local logout even if server logout fails
+      }
+      
+      // Clear local storage
+      await AsyncStorage.multiRemove(['authToken', 'userData']);
+      console.log('Local storage cleared');
+      
+      // Update state
+      setUser(null);
+      setIsAuthenticated(false);
+      
+      console.log('User logged out successfully');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      // Even if there's an error, clear the local state
+      setUser(null);
+      setIsAuthenticated(false);
+    }
   };
 
   if (isLoading) {
@@ -155,11 +243,12 @@ export default function App() {
               />
               <Stack.Screen 
                 name="InterviewDetails" 
-                component={InterviewDetails}
                 options={{
                   headerShown: false,
                 }}
-              />
+              >
+                {(props) => <InterviewDetails {...props} />}
+              </Stack.Screen>
             </>
           )}
         </Stack.Navigator>

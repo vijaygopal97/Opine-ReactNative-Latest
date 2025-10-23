@@ -68,6 +68,10 @@ export default function InterviewInterface({ navigation, route }: any) {
   const [selectedAC, setSelectedAC] = useState<string | null>(null);
   const [assignedACs, setAssignedACs] = useState<string[]>([]);
   const [requiresACSelection, setRequiresACSelection] = useState(false);
+  
+  // Quota management state
+  const [genderQuotas, setGenderQuotas] = useState<any>(null);
+  const [targetAudienceErrors, setTargetAudienceErrors] = useState<Map<string, string>>(new Map());
 
   // Get all questions from all sections
   const allQuestions = useMemo(() => {
@@ -304,6 +308,25 @@ export default function InterviewInterface({ navigation, route }: any) {
     };
   }, []);
 
+  // Fetch gender quotas from backend
+  const fetchGenderQuotas = useCallback(async () => {
+    try {
+      const result = await apiService.getGenderResponseCounts(survey._id);
+      if (result.success) {
+        setGenderQuotas(result.data.genderQuotas);
+      }
+    } catch (error) {
+      console.error('Error fetching gender quotas:', error);
+    }
+  }, [survey._id]);
+
+  // Fetch gender quotas when component mounts
+  useEffect(() => {
+    if (survey._id) {
+      fetchGenderQuotas();
+    }
+  }, [survey._id, fetchGenderQuotas]);
+
   const showSnackbar = (message: string) => {
     setSnackbarMessage(message);
     setSnackbarVisible(true);
@@ -337,9 +360,46 @@ export default function InterviewInterface({ navigation, route }: any) {
       setSelectedAC(response);
       console.log('AC selected:', response);
     }
+
+    // Real-time target audience validation for fixed questions
+    if (response && response.toString().trim().length > 0) {
+      const validationError = validateFixedQuestion(questionId, response);
+      setTargetAudienceErrors(prev => {
+        const newErrors = new Map(prev);
+        if (validationError) {
+          newErrors.set(questionId, validationError);
+        } else {
+          newErrors.delete(questionId);
+        }
+        return newErrors;
+      });
+
+      // Refresh gender quotas if gender question is answered
+      if (questionId === 'fixed_respondent_gender') {
+        // Small delay to allow backend to process the response
+        setTimeout(() => {
+          fetchGenderQuotas();
+        }, 1000);
+      }
+    } else {
+      // Clear target audience error if response is empty
+      setTargetAudienceErrors(prev => {
+        const newErrors = new Map(prev);
+        newErrors.delete(questionId);
+        return newErrors;
+      });
+    }
   };
 
   const goToNextQuestion = () => {
+    const currentQuestion = visibleQuestions[currentQuestionIndex];
+    
+    // Check for target audience validation errors
+    if (targetAudienceErrors.has(currentQuestion.id)) {
+      showSnackbar('Please correct the validation error before proceeding');
+      return;
+    }
+    
     if (currentQuestionIndex < visibleQuestions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
     }
@@ -538,6 +598,12 @@ export default function InterviewInterface({ navigation, route }: any) {
   const completeInterview = async () => {
     if (!sessionId) return;
 
+    // Check for any target audience validation errors
+    if (targetAudienceErrors.size > 0) {
+      showSnackbar('Please correct all validation errors before completing the interview');
+      return;
+    }
+
     try {
       setIsLoading(true);
       
@@ -669,6 +735,66 @@ export default function InterviewInterface({ navigation, route }: any) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Validate age against target audience requirements
+  const validateAge = (age: string) => {
+    const ageRange = survey.targetAudience?.demographics?.ageRange;
+    if (!ageRange || !ageRange.min || !ageRange.max) return null; // No age restrictions
+    
+    const ageNum = parseInt(age);
+    if (isNaN(ageNum)) return null; // Invalid age format
+    
+    if (ageNum < ageRange.min || ageNum > ageRange.max) {
+      return `Only respondents of age between ${ageRange.min} and ${ageRange.max} are allowed to participate`;
+    }
+    return null; // Valid age
+  };
+
+  // Validate gender against target audience requirements and quotas
+  const validateGender = (gender: string) => {
+    const genderRequirements = survey.targetAudience?.demographics?.genderRequirements;
+    if (!genderRequirements) return null; // No gender restrictions
+    
+    // Check if the selected gender is allowed
+    const allowedGenders = Object.keys(genderRequirements).filter(g => 
+      genderRequirements[g] && !g.includes('Percentage')
+    );
+    
+    if (allowedGenders.length === 0) return null; // No gender restrictions
+    
+    // Map the response value to the requirement key format
+    const genderMapping = {
+      'male': 'Male',
+      'female': 'Female', 
+      'non_binary': 'Non-binary'
+    };
+    
+    const mappedGender = genderMapping[gender as keyof typeof genderMapping];
+    if (!mappedGender || !allowedGenders.includes(mappedGender)) {
+      const allowedList = allowedGenders.join(', ');
+      return `Only ${allowedList} respondents are allowed to participate`;
+    }
+
+    // Check quota if available
+    if (genderQuotas && genderQuotas[mappedGender]) {
+      const quota = genderQuotas[mappedGender];
+      if (quota.isFull) {
+        return `Sample size for ${mappedGender} is completed. Please select a different gender.`;
+      }
+    }
+
+    return null; // Valid gender
+  };
+
+  // Validate fixed questions against target audience
+  const validateFixedQuestion = (questionId: string, response: any) => {
+    if (questionId === 'fixed_respondent_age') {
+      return validateAge(response);
+    } else if (questionId === 'fixed_respondent_gender') {
+      return validateGender(response);
+    }
+    return null; // No validation for other questions
+  };
+
   // Render question based on type
   const renderQuestion = (question: any) => {
     const currentResponse = responses[question.id] || '';
@@ -736,18 +862,49 @@ export default function InterviewInterface({ navigation, route }: any) {
 
       case 'single_choice':
       case 'single_select':
+        // Check if this is a gender question for quota display
+        const isGenderQuestion = question.id === 'fixed_respondent_gender';
+        
         return (
           <View style={styles.optionsContainer}>
-            {question.options?.map((option: any, index: number) => (
-              <View key={option.id || index} style={styles.optionItem}>
-                <RadioButton
-                  value={option.value}
-                  status={currentResponse === option.value ? 'checked' : 'unchecked'}
-                  onPress={() => handleResponseChange(question.id, option.value)}
-                />
-                <Text style={styles.optionText}>{option.text}</Text>
-              </View>
-            ))}
+            {question.options?.map((option: any, index: number) => {
+              // Get quota information for gender question
+              let quotaInfo = null;
+              if (isGenderQuestion && genderQuotas) {
+                const genderMapping = {
+                  'male': 'Male',
+                  'female': 'Female', 
+                  'non_binary': 'Non-binary'
+                };
+                const mappedGender = genderMapping[option.value as keyof typeof genderMapping];
+                if (mappedGender && genderQuotas[mappedGender]) {
+                  quotaInfo = genderQuotas[mappedGender];
+                }
+              }
+              
+              return (
+                <View key={option.id || index} style={styles.optionItem}>
+                  <RadioButton
+                    value={option.value}
+                    status={currentResponse === option.value ? 'checked' : 'unchecked'}
+                    onPress={() => handleResponseChange(question.id, option.value)}
+                  />
+                  <View style={styles.optionContent}>
+                    <Text style={styles.optionText}>{option.text}</Text>
+                    {quotaInfo && (
+                      <View style={styles.quotaInfo}>
+                        <Text style={styles.quotaText}>
+                          {quotaInfo.currentCount}/{quotaInfo.quota} ({quotaInfo.percentage}%)
+                        </Text>
+                        {quotaInfo.isFull && (
+                          <Text style={styles.quotaFullText}>Full</Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
           </View>
         );
 
@@ -935,6 +1092,15 @@ export default function InterviewInterface({ navigation, route }: any) {
             )}
             
             {renderQuestion(currentQuestion)}
+            
+            {/* Target Audience Validation Error */}
+            {targetAudienceErrors.has(currentQuestion.id) && (
+              <View style={styles.validationError}>
+                <Text style={styles.validationErrorText}>
+                  {targetAudienceErrors.get(currentQuestion.id)}
+                </Text>
+              </View>
+            )}
           </Card.Content>
         </Card>
 
@@ -1006,7 +1172,11 @@ export default function InterviewInterface({ navigation, route }: any) {
           <Button
             mode="contained"
             onPress={completeInterview}
-            style={styles.completeButton}
+            style={[
+              styles.completeButton,
+              targetAudienceErrors.size > 0 && styles.disabledButton
+            ]}
+            disabled={targetAudienceErrors.size > 0}
             loading={isLoading}
           >
             Complete Interview
@@ -1015,7 +1185,11 @@ export default function InterviewInterface({ navigation, route }: any) {
           <Button
             mode="contained"
             onPress={goToNextQuestion}
-            style={styles.nextButton}
+            style={[
+              styles.nextButton,
+              targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) && styles.disabledButton
+            ]}
+            disabled={targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id)}
           >
             Next
           </Button>
@@ -1318,5 +1492,47 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 0.45,
+  },
+  // Quota and validation styles
+  optionContent: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  quotaInfo: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quotaText: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontStyle: 'italic',
+  },
+  quotaFullText: {
+    fontSize: 11,
+    color: '#ef4444',
+    fontWeight: '600',
+    backgroundColor: '#fef2f2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  validationError: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#fef2f2',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  validationErrorText: {
+    fontSize: 14,
+    color: '#dc2626',
+    fontWeight: '500',
+  },
+  disabledButton: {
+    backgroundColor: '#9ca3af',
+    opacity: 0.6,
   },
 });
