@@ -272,18 +272,12 @@ export default function AvailableSurveys({ navigation }: any) {
             <Card key={survey._id} style={styles.surveyCard}>
               <Card.Content>
                 <View style={styles.surveyHeader}>
-                  <View style={styles.surveyTitleContainer}>
-                    <Text style={styles.surveyTitle}>{survey.surveyName}</Text>
-                    <View style={styles.badgesContainer}>
-                      <Chip
-                        icon={getModeIcon(survey.mode)}
-                        style={[styles.modeChip, { backgroundColor: getModeColor(survey.mode) }]}
-                        textStyle={styles.chipText}
-                        compact
-                      >
-                        {survey.mode === 'multi_mode' ? 'MULTI-MODE' : survey.mode.toUpperCase()}
-                      </Chip>
-                      {survey.assignedMode && survey.assignedMode !== 'single' && (
+                  <Text style={styles.surveyTitle}>{survey.surveyName}</Text>
+                  <View style={styles.badgesContainer}>
+                    {/* Show assigned modes only */}
+                    {survey.mode === 'multi_mode' ? (
+                      // For multi-mode surveys, show the specific assigned mode(s)
+                      survey.assignedMode ? (
                         <Chip
                           icon={getModeIcon(survey.assignedMode)}
                           style={[styles.modeChip, { backgroundColor: getModeColor(survey.assignedMode) }]}
@@ -292,15 +286,25 @@ export default function AvailableSurveys({ navigation }: any) {
                         >
                           {survey.assignedMode.toUpperCase()}
                         </Chip>
-                      )}
+                      ) : null
+                    ) : (
+                      // For single-mode surveys, show the mode
                       <Chip
-                        style={[styles.statusChip, { backgroundColor: getStatusColor(survey.status) }]}
+                        icon={getModeIcon(survey.mode)}
+                        style={[styles.modeChip, { backgroundColor: getModeColor(survey.mode) }]}
                         textStyle={styles.chipText}
                         compact
                       >
-                        {survey.status}
+                        {survey.mode.toUpperCase()}
                       </Chip>
-                    </View>
+                    )}
+                    <Chip
+                      style={[styles.statusChip, { backgroundColor: getStatusColor(survey.status) }]}
+                      textStyle={styles.chipText}
+                      compact
+                    >
+                      {survey.status}
+                    </Chip>
                   </View>
                 </View>
 
@@ -606,23 +610,17 @@ const styles = StyleSheet.create({
   surveyHeader: {
     marginBottom: 12,
   },
-  surveyTitleContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
   surveyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#1f2937',
-    flex: 1,
-    marginRight: 12,
+    marginBottom: 8,
     lineHeight: 26,
   },
   badgesContainer: {
     flexDirection: 'row',
     gap: 8,
+    marginBottom: 8,
   },
   modeChip: {
     height: 32,
