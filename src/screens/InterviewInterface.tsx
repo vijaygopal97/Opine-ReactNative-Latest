@@ -929,8 +929,18 @@ export default function InterviewInterface({ navigation, route }: any) {
       case 'multiple_choice':
         // Check if multiple selections are allowed
         const allowMultiple = question.settings?.allowMultiple || false;
+        const maxSelections = question.settings?.maxSelections;
+        const currentSelections = Array.isArray(currentResponse) ? currentResponse.length : 0;
+        
         return (
           <View style={styles.optionsContainer}>
+            {allowMultiple && maxSelections && (
+              <View style={styles.selectionLimitContainer}>
+                <Text style={styles.selectionLimitText}>
+                  Selection limit: {currentSelections} / {maxSelections}
+                </Text>
+              </View>
+            )}
             {question.options?.map((option: any, index: number) => {
               const isSelected = allowMultiple 
                 ? (Array.isArray(currentResponse) && currentResponse.includes(option.value))
@@ -943,10 +953,22 @@ export default function InterviewInterface({ navigation, route }: any) {
                     onPress={() => {
                       if (allowMultiple) {
                         const currentAnswers = Array.isArray(currentResponse) ? currentResponse : [];
-                        const newAnswers = currentAnswers.includes(option.value)
-                          ? currentAnswers.filter((a: string) => a !== option.value)
-                          : [...currentAnswers, option.value];
-                        handleResponseChange(question.id, newAnswers);
+                        const maxSelections = question.settings?.maxSelections;
+                        
+                        if (currentAnswers.includes(option.value)) {
+                          // Deselecting - always allowed
+                          const newAnswers = currentAnswers.filter((a: string) => a !== option.value);
+                          handleResponseChange(question.id, newAnswers);
+                        } else {
+                          // Selecting - check if we've reached the maximum selections limit
+                          if (maxSelections && currentAnswers.length >= maxSelections) {
+                            // Show a message that maximum selections reached
+                            showSnackbar(`Maximum ${maxSelections} selection${maxSelections > 1 ? 's' : ''} allowed`);
+                            return;
+                          }
+                          const newAnswers = [...currentAnswers, option.value];
+                          handleResponseChange(question.id, newAnswers);
+                        }
                       } else {
                         // Single selection - use radio button behavior
                         handleResponseChange(question.id, option.value);
@@ -1444,6 +1466,19 @@ const styles = StyleSheet.create({
   },
   textInput: {
     marginTop: 8,
+  },
+  selectionLimitContainer: {
+    backgroundColor: '#dbeafe',
+    borderColor: '#93c5fd',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  selectionLimitText: {
+    fontSize: 14,
+    color: '#1e40af',
+    fontWeight: '500',
   },
   optionsContainer: {
     marginTop: 8,

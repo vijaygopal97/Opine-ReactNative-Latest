@@ -29,6 +29,17 @@ const { width } = Dimensions.get('window');
 
 const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }) => {
   const interview = route?.params?.interview;
+  
+  if (!interview) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ fontSize: 16, color: '#ef4444', marginBottom: 20 }}>Interview data not available</Text>
+          <Button onPress={() => navigation?.goBack()}>Go Back</Button>
+        </View>
+      </SafeAreaView>
+    );
+  }
   const [isLoading, setIsLoading] = useState(false);
   const [detailedInterview, setDetailedInterview] = useState<SurveyResponse | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -106,7 +117,13 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
   };
 
   const handlePlayAudio = async () => {
-    if (!interview.audioRecording?.audioUrl) {
+    if (!interview) {
+      Alert.alert('Error', 'Interview data not available.');
+      return;
+    }
+    
+    const audioUrl = interview.audioRecording?.url || interview.audioRecording?.audioUrl || interview.audioUrl;
+    if (!audioUrl) {
       Alert.alert('No Audio', 'No audio recording available for this interview.');
       return;
     }
@@ -122,10 +139,10 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
         }
       } else {
         setIsLoadingAudio(true);
-        const audioUrl = `https://opine.exypnossolutions.com${interview.audioRecording.audioUrl}`;
+        const fullAudioUrl = audioUrl.startsWith('http') ? audioUrl : `https://opine.exypnossolutions.com${audioUrl}`;
         
         const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: audioUrl },
+          { uri: fullAudioUrl },
           { shouldPlay: true }
         );
         
@@ -149,8 +166,10 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
   };
 
   const handleViewLocation = () => {
-    if (interview.location?.latitude && interview.location?.longitude) {
-      const mapsUrl = `https://www.google.com/maps?q=${interview.location.latitude},${interview.location.longitude}`;
+    if (!interview) return;
+    const location = interview.location || interview.locationData;
+    if (location?.latitude && location?.longitude) {
+      const mapsUrl = `https://www.google.com/maps?q=${location.latitude},${location.longitude}`;
       Linking.openURL(mapsUrl);
     } else {
       Alert.alert('No Location', 'No location data available for this interview.');
@@ -297,25 +316,25 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
         </View>
 
         {/* Location Information */}
-        {interview.location && (
+        {(interview.location || interview.locationData) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Location Information</Text>
             <View style={styles.infoCard}>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>Address:</Text>
-                <Text style={styles.locationValue}>{interview.location.address}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.address || 'N/A'}</Text>
               </View>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>City:</Text>
-                <Text style={styles.locationValue}>{interview.location.city}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.city || 'N/A'}</Text>
               </View>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>State:</Text>
-                <Text style={styles.locationValue}>{interview.location.state}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.state || 'N/A'}</Text>
               </View>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>Country:</Text>
-                <Text style={styles.locationValue}>{interview.location.country}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.country || 'N/A'}</Text>
               </View>
               <TouchableOpacity style={styles.mapButton} onPress={handleViewLocation}>
                 <Ionicons name="location" size={20} color="#3b82f6" />
@@ -326,30 +345,34 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
         )}
 
         {/* Audio Recording */}
-        {interview.audioRecording && (
+        {(interview.audioRecording || interview.audioUrl) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Audio Recording</Text>
             <View style={styles.infoCard}>
               <View style={styles.audioRow}>
                 <Text style={styles.audioLabel}>Has Audio:</Text>
                 <Text style={styles.audioValue}>
-                  {interview.audioRecording.hasAudio ? 'Yes' : 'No'}
+                  {(interview.audioRecording?.url || interview.audioRecording?.audioUrl || interview.audioUrl) ? 'Yes' : 'No'}
                 </Text>
               </View>
-              {interview.audioRecording.hasAudio && (
+              {(interview.audioRecording?.url || interview.audioRecording?.audioUrl || interview.audioUrl) && (
                 <>
-                  <View style={styles.audioRow}>
-                    <Text style={styles.audioLabel}>Duration:</Text>
-                    <Text style={styles.audioValue}>
-                      {formatDuration(interview.audioRecording.recordingDuration)}
-                    </Text>
-                  </View>
-                  <View style={styles.audioRow}>
-                    <Text style={styles.audioLabel}>File Size:</Text>
-                    <Text style={styles.audioValue}>
-                      {(interview.audioRecording.fileSize / 1024 / 1024).toFixed(2)} MB
-                    </Text>
-                  </View>
+                  {interview.audioRecording?.duration && (
+                    <View style={styles.audioRow}>
+                      <Text style={styles.audioLabel}>Duration:</Text>
+                      <Text style={styles.audioValue}>
+                        {formatDuration(interview.audioRecording.duration)}
+                      </Text>
+                    </View>
+                  )}
+                  {interview.audioRecording?.fileSize && (
+                    <View style={styles.audioRow}>
+                      <Text style={styles.audioLabel}>File Size:</Text>
+                      <Text style={styles.audioValue}>
+                        {(interview.audioRecording.fileSize / 1024 / 1024).toFixed(2)} MB
+                      </Text>
+                    </View>
+                  )}
                   <TouchableOpacity 
                     style={[styles.playButton, isLoadingAudio && styles.disabledButton]} 
                     onPress={handlePlayAudio}
