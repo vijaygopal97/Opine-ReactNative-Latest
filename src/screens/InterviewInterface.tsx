@@ -335,6 +335,39 @@ export default function InterviewInterface({ navigation, route }: any) {
     return () => clearInterval(interval);
   }, [startTime, isPaused]);
 
+  // Cleanup any existing recording on component mount - ensure clean state
+  useEffect(() => {
+    const cleanupOnMount = async () => {
+      // Always ensure globalRecording is null on mount
+      if (globalRecording) {
+        try {
+          console.log('Cleaning up existing recording on mount...');
+          const status = await globalRecording.getStatusAsync();
+          if (status.isRecording || status.canRecord) {
+            await globalRecording.stopAndUnloadAsync();
+          }
+        } catch (error) {
+          console.log('Cleanup on mount error (non-fatal):', error);
+        }
+        globalRecording = null;
+      }
+      // Also reset audio mode to ensure clean state
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: false,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+        // Wait a bit before allowing new recording
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (error) {
+        console.log('Error resetting audio mode (non-fatal):', error);
+      }
+    };
+    cleanupOnMount();
+  }, []);
+
   // Cleanup recording on component unmount
   useEffect(() => {
     return () => {
@@ -371,7 +404,14 @@ export default function InterviewInterface({ navigation, route }: any) {
     try {
       if (globalRecording) {
         console.log('Cleaning up recording...');
-        await globalRecording.stopAndUnloadAsync();
+        try {
+          const status = await globalRecording.getStatusAsync();
+          if (status.isRecording || status.canRecord) {
+            await globalRecording.stopAndUnloadAsync();
+          }
+        } catch (error) {
+          console.log('Error during cleanup:', error);
+        }
         globalRecording = null;
       }
     } catch (error) {
@@ -380,10 +420,17 @@ export default function InterviewInterface({ navigation, route }: any) {
       setIsRecording(false);
       setIsAudioPaused(false);
       setAudioUri(null);
+      globalRecording = null;
     }
   };
 
   const handleResponseChange = (questionId: string, response: any) => {
+    // Prevent interaction if recording hasn't started (for CAPI mode)
+    const shouldRecordAudio = (survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi');
+    if (shouldRecordAudio && !isRecording && audioPermission !== false) {
+      return; // Block interaction until recording starts
+    }
+    
     setResponses(prev => ({
       ...prev,
       [questionId]: response
@@ -511,18 +558,25 @@ export default function InterviewInterface({ navigation, route }: any) {
   };
 
   const startAudioRecording = async () => {
+    if (isRecording) {
+      console.log('Already recording, skipping...');
+      return;
+    }
+    
     try {
       console.log('=== EXPO-AV AUDIO RECORDING START ===');
       
-      if (isRecording) {
-        console.log('Already recording, skipping...');
-        return;
-      }
-      
-      // Clean up any existing recording
+      // Clean up any existing recording - simple approach like before
       if (globalRecording) {
-        await globalRecording.stopAndUnloadAsync();
+        try {
+          console.log('Cleaning up existing recording...');
+          await globalRecording.stopAndUnloadAsync();
+        } catch (cleanupError) {
+          console.log('Cleanup error (non-fatal):', cleanupError);
+        }
         globalRecording = null;
+        // Wait a bit for native module to release
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
       
       console.log('Requesting audio permissions...');
@@ -539,11 +593,12 @@ export default function InterviewInterface({ navigation, route }: any) {
         playThroughEarpieceAndroid: false,
       });
       
-      console.log('Creating recording...');
+      console.log('Creating new recording object...');
+      // Create a completely new recording object
       const recording = new Audio.Recording();
-      globalRecording = recording;
       
       console.log('Preparing recording...');
+      // Only set globalRecording AFTER successful preparation
       await recording.prepareToRecordAsync({
         android: {
           extension: '.m4a',
@@ -567,6 +622,9 @@ export default function InterviewInterface({ navigation, route }: any) {
         },
       });
       
+      // Only set globalRecording after successful preparation
+      globalRecording = recording;
+      
       console.log('Starting recording...');
       await recording.startAsync();
       
@@ -582,7 +640,15 @@ export default function InterviewInterface({ navigation, route }: any) {
       showSnackbar(`Failed to start recording: ${error.message}`);
       setAudioPermission(false);
       setIsRecording(false);
-      globalRecording = null;
+      // Clean up on error
+      if (globalRecording) {
+        try {
+          await globalRecording.stopAndUnloadAsync();
+        } catch (cleanupError) {
+          console.log('Error cleaning up on failure:', cleanupError);
+        }
+        globalRecording = null;
+      }
     }
   };
 
@@ -1513,6 +1579,51 @@ export default function InterviewInterface({ navigation, route }: any) {
           </View>
         </View>
         
+        {/* Recording Indicator and Location (compact) - Separate line */}
+        <View style={styles.headerStatusRow}>
+          {/* Recording Indicator */}
+          {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && (
+            <View style={styles.recordingIndicator}>
+              <View style={[
+                styles.recordingDotSmall,
+                {
+                  backgroundColor: audioPermission === false 
+                    ? '#ef4444'
+                    : isRecording 
+                      ? (isAudioPaused ? '#fbbf24' : '#ef4444') 
+                      : '#6b7280'
+                }
+              ]} />
+              <Text style={styles.recordingStatusTextSmall}>
+                {audioPermission === false 
+                  ? 'No Permission'
+                  : isRecording 
+                    ? (isAudioPaused ? 'Paused' : 'Recording') 
+                    : 'Ready'
+                }
+              </Text>
+            </View>
+          )}
+          
+            {/* Location (only for first question) */}
+            {currentQuestionIndex === 0 && (
+              <>
+                {locationLoading ? (
+                  <View style={styles.locationIndicator}>
+                    <ActivityIndicator size="small" color="#2563eb" />
+                    <Text style={styles.locationTextSmall}>Getting location...</Text>
+                  </View>
+                ) : locationData && locationData.address ? (
+                  <View style={styles.locationIndicator}>
+                    <Text style={styles.locationTextSmall} numberOfLines={1}>
+                      📍 {locationData.address}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
+        </View>
+        
         <View style={styles.headerInfo}>
           <Text style={styles.surveyTitle}>{survey.surveyName}</Text>
           <Text style={styles.progressText}>
@@ -1527,6 +1638,29 @@ export default function InterviewInterface({ navigation, route }: any) {
       <ScrollView style={styles.content}>
         <Card style={styles.questionCard}>
           <Card.Content>
+            {/* Show loading/blocking overlay if recording hasn't started */}
+            {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+             !isRecording && audioPermission !== false && (
+              <View style={styles.blockingOverlay}>
+                <View style={styles.blockingContent}>
+                  <ActivityIndicator size="large" color="#2563eb" />
+                  <Text style={styles.blockingText}>Waiting for recording to start...</Text>
+                  <Text style={styles.blockingSubtext}>Please wait while we initialize the audio recording</Text>
+                </View>
+              </View>
+            )}
+            
+            {/* Show permission denied message */}
+            {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+             audioPermission === false && (
+              <View style={styles.blockingOverlay}>
+                <View style={styles.blockingContent}>
+                  <Text style={styles.blockingText}>Audio Permission Required</Text>
+                  <Text style={styles.blockingSubtext}>Please grant audio recording permission to continue</Text>
+                </View>
+              </View>
+            )}
+            
             <Text style={styles.questionText}>{currentQuestion.text}</Text>
             {currentQuestion.description && (
               <Text style={styles.questionDescription}>{currentQuestion.description}</Text>
@@ -1535,7 +1669,14 @@ export default function InterviewInterface({ navigation, route }: any) {
               <Text style={styles.requiredText}>* Required</Text>
             )}
             
-            {renderQuestion(currentQuestion)}
+            <View style={[
+              styles.questionContent,
+              (!isRecording && audioPermission !== false && 
+               ((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi'))) && 
+              styles.disabledContent
+            ]}>
+              {renderQuestion(currentQuestion)}
+            </View>
             
             {/* Target Audience Validation Error */}
             {targetAudienceErrors.has(currentQuestion.id) && (
@@ -1547,58 +1688,6 @@ export default function InterviewInterface({ navigation, route }: any) {
             )}
           </Card.Content>
         </Card>
-
-        {/* Location Status */}
-        {locationLoading && (
-          <Card style={styles.statusCard}>
-            <Card.Content>
-              <View style={styles.statusRow}>
-                <ActivityIndicator size="small" color="#2563eb" />
-                <Text style={styles.statusText}>Getting location...</Text>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {locationData && (
-          <Card style={styles.statusCard}>
-            <Card.Content>
-              <View style={styles.statusRow}>
-                <Text style={styles.statusText}>📍 Location: {locationData.address}</Text>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* Audio Recording Indicator */}
-        {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && (
-          <Card style={styles.audioCard}>
-            <Card.Content>
-              <View style={styles.audioHeader}>
-                <View style={styles.audioIndicator}>
-                  <View style={[
-                    styles.recordingDot,
-                    {
-                      backgroundColor: audioPermission === false 
-                        ? '#ef4444'
-                        : isRecording 
-                          ? (isAudioPaused ? '#fbbf24' : '#ef4444') 
-                          : '#6b7280'
-                    }
-                  ]} />
-                  <Text style={styles.audioStatusText}>
-                    {audioPermission === false 
-                      ? 'Audio Permission Denied'
-                      : isRecording 
-                        ? (isAudioPaused ? 'Audio Paused' : 'Recording') 
-                        : 'Audio Ready'
-                    }
-                  </Text>
-                </View>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
       </ScrollView>
 
       {/* Navigation */}
@@ -1606,7 +1695,9 @@ export default function InterviewInterface({ navigation, route }: any) {
         <Button
           mode="outlined"
           onPress={goToPreviousQuestion}
-          disabled={currentQuestionIndex === 0}
+          disabled={currentQuestionIndex === 0 || 
+                   (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                    !isRecording && audioPermission !== false)}
           style={styles.navButton}
         >
           Previous
@@ -1618,9 +1709,13 @@ export default function InterviewInterface({ navigation, route }: any) {
             onPress={completeInterview}
             style={[
               styles.completeButton,
-              targetAudienceErrors.size > 0 && styles.disabledButton
+              (targetAudienceErrors.size > 0 || 
+               (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                !isRecording && audioPermission !== false)) && styles.disabledButton
             ]}
-            disabled={targetAudienceErrors.size > 0}
+            disabled={targetAudienceErrors.size > 0 || 
+                     (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                      !isRecording && audioPermission !== false)}
             loading={isLoading}
           >
             Complete Interview
@@ -1631,13 +1726,17 @@ export default function InterviewInterface({ navigation, route }: any) {
             onPress={goToNextQuestion}
             style={[
               styles.nextButton,
-              (targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) || 
+              ((targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) || 
                (visibleQuestions[currentQuestionIndex]?.required && 
-                !responses[visibleQuestions[currentQuestionIndex]?.id])) && styles.disabledButton
+                !responses[visibleQuestions[currentQuestionIndex]?.id])) ||
+               (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                !isRecording && audioPermission !== false)) && styles.disabledButton
             ]}
             disabled={targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) || 
                      (visibleQuestions[currentQuestionIndex]?.required && 
-                      !responses[visibleQuestions[currentQuestionIndex]?.id])}
+                      !responses[visibleQuestions[currentQuestionIndex]?.id]) ||
+                     (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                      !isRecording && audioPermission !== false)}
           >
             Next
           </Button>
@@ -1726,7 +1825,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  headerStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  recordingDotSmall: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  recordingStatusTextSmall: {
+    fontSize: 11,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  locationIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    maxWidth: 200,
+    gap: 6,
+  },
+  locationTextSmall: {
+    fontSize: 11,
+    color: '#374151',
+    fontWeight: '500',
   },
   headerActions: {
     flexDirection: 'row',
@@ -1767,6 +1907,43 @@ const styles = StyleSheet.create({
   questionCard: {
     marginBottom: 16,
     elevation: 2,
+    position: 'relative',
+  },
+  blockingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    zIndex: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  blockingContent: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  blockingText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  blockingSubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  questionContent: {
+    position: 'relative',
+  },
+  disabledContent: {
+    opacity: 0.5,
+    pointerEvents: 'none',
   },
   questionText: {
     fontSize: 18,
