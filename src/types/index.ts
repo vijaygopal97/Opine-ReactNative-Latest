@@ -78,7 +78,7 @@ export interface Question {
   id?: string;
   type: 'text' | 'multiple_choice' | 'single_choice' | 'rating' | 'date' | 'number';
   text: string;
-  options?: string[] | Array<{ id?: string; text: string; value?: string }>;
+  options?: string[] | Array<{ id?: string; text: string; value?: string; code?: string }>;
   required: boolean;
   order: number;
   description?: string;
