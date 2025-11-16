@@ -1358,23 +1358,46 @@ export default function InterviewInterface({ navigation, route }: any) {
       case 'rating':
       case 'rating_scale':
         const scale = question.scale || { min: 1, max: 5 };
+        const min = scale.min || 1;
+        const max = scale.max || 5;
+        const labels = scale.labels || [];
+        const minLabel = scale.minLabel || '';
+        const maxLabel = scale.maxLabel || '';
         const ratings = [];
-        for (let i = scale.min; i <= scale.max; i++) {
+        for (let i = min; i <= max; i++) {
           ratings.push(i);
         }
         return (
           <View style={styles.ratingContainer}>
-            {ratings.map((rating) => (
-              <Button
-                key={rating}
-                mode={currentResponse === rating ? 'contained' : 'outlined'}
-                onPress={() => handleResponseChange(question.id, rating)}
-                style={styles.ratingButton}
-                compact
-              >
-                {rating}
-              </Button>
-            ))}
+            <View style={styles.ratingButtonsRow}>
+              {ratings.map((rating) => {
+                const label = labels[rating - min] || '';
+                return (
+                  <View key={rating} style={styles.ratingButtonWrapper}>
+                    <Button
+                      mode={currentResponse === rating ? 'contained' : 'outlined'}
+                      onPress={() => handleResponseChange(question.id, rating)}
+                      style={[
+                        styles.ratingButton,
+                        currentResponse === rating && styles.ratingButtonSelected
+                      ]}
+                      compact
+                    >
+                      {rating}
+                    </Button>
+                    {label ? (
+                      <Text style={styles.ratingLabel}>{label}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+            {(minLabel || maxLabel) && (
+              <View style={styles.ratingLabelsRow}>
+                <Text style={styles.ratingScaleLabel}>{minLabel}</Text>
+                <Text style={styles.ratingScaleLabel}>{maxLabel}</Text>
+              </View>
+            )}
           </View>
         );
 
@@ -1819,14 +1842,41 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   ratingContainer: {
+    marginTop: 16,
+  },
+  ratingButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginTop: 16,
     flexWrap: 'wrap',
+    marginBottom: 8,
   },
-  ratingButton: {
+  ratingButtonWrapper: {
+    alignItems: 'center',
     marginHorizontal: 4,
     marginVertical: 4,
+  },
+  ratingButton: {
+    minWidth: 50,
+  },
+  ratingButtonSelected: {
+    backgroundColor: '#fbbf24',
+  },
+  ratingLabel: {
+    fontSize: 10,
+    color: '#6b7280',
+    marginTop: 4,
+    textAlign: 'center',
+    maxWidth: 60,
+  },
+  ratingLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  ratingScaleLabel: {
+    fontSize: 12,
+    color: '#6b7280',
   },
   unsupportedContainer: {
     padding: 20,
