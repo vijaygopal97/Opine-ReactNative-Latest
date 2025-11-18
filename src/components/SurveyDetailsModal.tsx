@@ -54,7 +54,7 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
       for (const section of survey.sections) {
         if (section.questions) {
           for (const question of section.questions) {
-            if (question.id === questionId) {
+            if ((question.id || question._id) === questionId) {
               return question;
             }
           }
@@ -63,7 +63,7 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
     }
     if (survey.questions) {
       for (const question of survey.questions) {
-        if (question.id === questionId) {
+        if ((question.id || question._id) === questionId) {
           return question;
         }
       }
@@ -97,19 +97,19 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
   };
 
   // Helper function to format date
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString?: string) => {
     if (!dateString) return 'Not specified';
     return new Date(dateString).toLocaleDateString();
   };
 
   // Helper function to format date time
-  const formatDateTime = (dateString: string) => {
+  const formatDateTime = (dateString?: string) => {
     if (!dateString) return 'Not specified';
     return new Date(dateString).toLocaleString();
   };
 
   // Helper function to get days remaining
-  const getDaysRemaining = (deadline: string) => {
+  const getDaysRemaining = (deadline?: string) => {
     if (!deadline) return 'Not specified';
     const today = new Date();
     const deadlineDate = new Date(deadline);
@@ -160,7 +160,7 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
             </View>
             <View style={styles.overviewText}>
               <Text style={styles.overviewLabel}>Start Date</Text>
-              <Text style={styles.overviewValue}>{formatDate(survey.startDate)}</Text>
+              <Text style={styles.overviewValue}>{formatDate(survey.startDate || '')}</Text>
             </View>
           </Card.Content>
         </Card>
@@ -172,7 +172,7 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
             </View>
             <View style={styles.overviewText}>
               <Text style={styles.overviewLabel}>Deadline</Text>
-              <Text style={styles.overviewValue}>{formatDate(survey.deadline)}</Text>
+              <Text style={styles.overviewValue}>{formatDate(survey.deadline || '')}</Text>
             </View>
           </Card.Content>
         </Card>
@@ -184,7 +184,7 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
             </View>
             <View style={styles.overviewText}>
               <Text style={styles.overviewLabel}>Days Remaining</Text>
-              <Text style={styles.overviewValue}>{getDaysRemaining(survey.deadline)}</Text>
+              <Text style={styles.overviewValue}>{getDaysRemaining(survey.deadline || '')}</Text>
             </View>
           </Card.Content>
         </Card>
@@ -230,12 +230,12 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
           <View style={styles.assignmentInfo}>
             <View style={styles.assignmentItem}>
               <Text style={styles.assignmentLabel}>Assigned At</Text>
-              <Text style={styles.assignmentValue}>{formatDateTime(survey.assignedAt)}</Text>
+              <Text style={styles.assignmentValue}>{formatDateTime(survey.assignedAt || '')}</Text>
             </View>
             <View style={styles.assignmentItem}>
               <Text style={styles.assignmentLabel}>Assignment Status</Text>
               <Chip 
-                style={[styles.statusChip, { backgroundColor: getStatusColor(survey.assignmentStatus) }]}
+                style={[styles.statusChip, { backgroundColor: getStatusColor(survey.assignmentStatus || '') }]}
                 textStyle={styles.statusChipText}
               >
                 {survey.assignmentStatus}
@@ -420,13 +420,15 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
                             <Text style={styles.optionsTitle}>Answer Options:</Text>
                             <View style={styles.optionsGrid}>
                               {question.options.map((option, optionIndex) => (
-                                <View key={option.id || optionIndex} style={styles.optionItem}>
+                                <View key={typeof option === 'string' ? optionIndex : (option.id || optionIndex)} style={styles.optionItem}>
                                   <View style={styles.optionLetter}>
                                     <Text style={styles.optionLetterText}>
                                       {String.fromCharCode(65 + optionIndex)}
                                     </Text>
                                   </View>
-                                  <Text style={styles.optionText}>{option.text}</Text>
+                                  <Text style={styles.optionText}>
+                                    {typeof option === 'string' ? option : (option.text || option.value || String(option))}
+                                  </Text>
                                 </View>
                               ))}
                             </View>
@@ -509,14 +511,16 @@ export default function SurveyDetailsModal({ visible, survey, onClose }: SurveyD
                       <View style={styles.optionsContainer}>
                         <Text style={styles.optionsTitle}>Answer Options:</Text>
                         <View style={styles.optionsGrid}>
-                          {question.options.map((option, optionIndex) => (
-                            <View key={option.id || optionIndex} style={styles.optionItem}>
-                              <View style={styles.optionLetter}>
-                                <Text style={styles.optionLetterText}>
-                                  {String.fromCharCode(65 + optionIndex)}
-                                </Text>
-                              </View>
-                              <Text style={styles.optionText}>{option.text}</Text>
+                              {question.options.map((option, optionIndex) => (
+                                <View key={typeof option === 'string' ? optionIndex : (option.id || optionIndex)} style={styles.optionItem}>
+                                  <View style={styles.optionLetter}>
+                                    <Text style={styles.optionLetterText}>
+                                      {String.fromCharCode(65 + optionIndex)}
+                                    </Text>
+                                  </View>
+                                  <Text style={styles.optionText}>
+                                    {typeof option === 'string' ? option : (option.text || option.value || String(option))}
+                                  </Text>
                             </View>
                           ))}
                         </View>

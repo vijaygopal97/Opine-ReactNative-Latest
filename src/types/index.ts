@@ -59,10 +59,14 @@ export interface Survey {
   maxInterviews?: number;
   completedInterviews?: number;
   deadline?: string;
+  startDate?: string;
+  purpose?: string;
+  costPerInterview?: number;
 }
 
 export interface Section {
-  _id: string;
+  _id?: string;
+  id?: string;
   title: string;
   description?: string;
   questions: Question[];
@@ -70,16 +74,32 @@ export interface Section {
 }
 
 export interface Question {
-  _id: string;
-  type: 'text' | 'multiple_choice' | 'single_choice' | 'rating' | 'date' | 'number';
+  _id?: string;
+  id?: string;
+  type: 'text' | 'multiple_choice' | 'single_choice' | 'rating' | 'date' | 'number' | 'numeric';
   text: string;
-  options?: string[];
+  options?: string[] | Array<{ id?: string; text: string; value?: string; code?: string }>;
   required: boolean;
   order: number;
+  description?: string;
+  conditions?: any[];
+  scale?: {
+    min?: number;
+    max?: number;
+    step?: number;
+    labels?: string[];
+    minLabel?: string;
+    maxLabel?: string;
+  };
   validation?: {
     min?: number;
     max?: number;
     pattern?: string;
+  };
+  settings?: {
+    allowMultiple?: boolean;
+    maxSelections?: number;
+    allowOther?: boolean;
   };
 }
 
@@ -95,7 +115,15 @@ export interface SurveyResponse {
   completedAt?: string;
   submittedAt?: string;
   locationData?: LocationData;
+  location?: LocationData;
   audioUrl?: string;
+  audioRecording?: {
+    url?: string;
+    audioUrl?: string;
+    fileSize?: number;
+    format?: string;
+    duration?: number;
+  };
   totalDuration?: number;
   createdAt: string;
   updatedAt: string;

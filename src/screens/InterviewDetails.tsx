@@ -29,6 +29,17 @@ const { width } = Dimensions.get('window');
 
 const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }) => {
   const interview = route?.params?.interview;
+  
+  if (!interview) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ fontSize: 16, color: '#ef4444', marginBottom: 20 }}>Interview data not available</Text>
+          <Button onPress={() => navigation?.goBack()}>Go Back</Button>
+        </View>
+      </SafeAreaView>
+    );
+  }
   const [isLoading, setIsLoading] = useState(false);
   const [detailedInterview, setDetailedInterview] = useState<SurveyResponse | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -106,7 +117,13 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
   };
 
   const handlePlayAudio = async () => {
-    if (!interview.audioRecording?.audioUrl) {
+    if (!interview) {
+      Alert.alert('Error', 'Interview data not available.');
+      return;
+    }
+    
+    const audioUrl = interview.audioRecording?.url || interview.audioRecording?.audioUrl || interview.audioUrl;
+    if (!audioUrl) {
       Alert.alert('No Audio', 'No audio recording available for this interview.');
       return;
     }
@@ -122,10 +139,10 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
         }
       } else {
         setIsLoadingAudio(true);
-        const audioUrl = `https://opine.exypnossolutions.com${interview.audioRecording.audioUrl}`;
+        const fullAudioUrl = audioUrl.startsWith('http') ? audioUrl : `https://opine.exypnossolutions.com${audioUrl}`;
         
         const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: audioUrl },
+          { uri: fullAudioUrl },
           { shouldPlay: true }
         );
         
@@ -149,26 +166,129 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
   };
 
   const handleViewLocation = () => {
-    if (interview.location?.latitude && interview.location?.longitude) {
-      const mapsUrl = `https://www.google.com/maps?q=${interview.location.latitude},${interview.location.longitude}`;
+    if (!interview) return;
+    const location = interview.location || interview.locationData;
+    if (location?.latitude && location?.longitude) {
+      const mapsUrl = `https://www.google.com/maps?q=${location.latitude},${location.longitude}`;
       Linking.openURL(mapsUrl);
     } else {
       Alert.alert('No Location', 'No location data available for this interview.');
     }
   };
 
-  const renderResponseItem = (response: any, index: number) => (
-    <View key={index} style={styles.responseItem}>
-      <Text style={styles.questionText}>{response.questionText}</Text>
-      <Text style={styles.answerText}>
-        {response.isSkipped ? (
-          <Text style={styles.skippedText}>Skipped</Text>
-        ) : (
-          response.response || 'No response'
-        )}
-      </Text>
-    </View>
-  );
+  // Helper function to format response display text (similar to web version)
+  const formatResponseDisplay = (response: any, surveyQuestion: any) => {
+    if (!response || response === null || response === undefined) {
+      return 'No response';
+    }
+
+    // If it's an array (multiple selections)
+    if (Array.isArray(response)) {
+      if (response.length === 0) return 'No selections';
+      
+      // Map each value to its display text using the question options
+      const displayTexts = response.map((value: any) => {
+        // Check if this is an "Others: [specified text]" response
+        if (typeof value === 'string' && value.startsWith('Others: ')) {
+          return value; // Return as-is (e.g., "Others: Custom text")
+        }
+        
+        if (surveyQuestion && surveyQuestion.options) {
+          const option = surveyQuestion.options.find((opt: any) => {
+            const optValue = opt.value || opt.text;
+            return optValue === value;
+          });
+          return option ? option.text : value;
+        }
+        return value;
+      });
+      
+      return displayTexts.join(', ');
+    }
+
+    // If it's a string or single value
+    if (typeof response === 'string' || typeof response === 'number') {
+      // Check if this is an "Others: [specified text]" response
+      if (typeof response === 'string' && response.startsWith('Others: ')) {
+        return response; // Return as-is (e.g., "Others: Custom text")
+      }
+      
+      // Handle rating responses with labels
+      if (surveyQuestion && surveyQuestion.type === 'rating' && typeof response === 'number') {
+        const scale = surveyQuestion.scale || {};
+        const labels = scale.labels || [];
+        const min = scale.min || 1;
+        const label = labels[response - min];
+        if (label) {
+          return `${response} (${label})`;
+        }
+        return response.toString();
+      }
+      
+      // Map to display text using question options
+      if (surveyQuestion && surveyQuestion.options) {
+        const option = surveyQuestion.options.find((opt: any) => {
+          const optValue = opt.value || opt.text;
+          return optValue === response;
+        });
+        return option ? option.text : response.toString();
+      }
+      return response.toString();
+    }
+
+    return JSON.stringify(response);
+  };
+
+  // Helper function to find question by text in survey
+  const findQuestionByText = (questionText: string, survey: any) => {
+    if (!survey || !questionText) return null;
+    
+    // Search in sections
+    if (survey.sections) {
+      for (const section of survey.sections) {
+        if (section.questions) {
+          for (const question of section.questions) {
+            if (question.text === questionText || question.questionText === questionText) {
+              return question;
+            }
+          }
+        }
+      }
+    }
+    
+    // Search in top-level questions
+    if (survey.questions) {
+      for (const question of survey.questions) {
+        if (question.text === questionText || question.questionText === questionText) {
+          return question;
+        }
+      }
+    }
+    
+    return null;
+  };
+
+  const renderResponseItem = (response: any, index: number) => {
+    // Find the corresponding question in the survey to get options
+    const survey = detailedInterview?.survey || interview?.survey;
+    const surveyQuestion = findQuestionByText(response.questionText, survey);
+    
+    // Format the response for display
+    const formattedResponse = formatResponseDisplay(response.response, surveyQuestion);
+    
+    return (
+      <View key={index} style={styles.responseItem}>
+        <Text style={styles.questionText}>{response.questionText}</Text>
+        <Text style={styles.answerText}>
+          {response.isSkipped ? (
+            <Text style={styles.skippedText}>Skipped</Text>
+          ) : (
+            formattedResponse
+          )}
+        </Text>
+      </View>
+    );
+  };
 
   if (!interview) {
     return (
@@ -297,25 +417,25 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
         </View>
 
         {/* Location Information */}
-        {interview.location && (
+        {(interview.location || interview.locationData) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Location Information</Text>
             <View style={styles.infoCard}>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>Address:</Text>
-                <Text style={styles.locationValue}>{interview.location.address}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.address || 'N/A'}</Text>
               </View>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>City:</Text>
-                <Text style={styles.locationValue}>{interview.location.city}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.city || 'N/A'}</Text>
               </View>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>State:</Text>
-                <Text style={styles.locationValue}>{interview.location.state}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.state || 'N/A'}</Text>
               </View>
               <View style={styles.locationRow}>
                 <Text style={styles.locationLabel}>Country:</Text>
-                <Text style={styles.locationValue}>{interview.location.country}</Text>
+                <Text style={styles.locationValue}>{(interview.location || interview.locationData)?.country || 'N/A'}</Text>
               </View>
               <TouchableOpacity style={styles.mapButton} onPress={handleViewLocation}>
                 <Ionicons name="location" size={20} color="#3b82f6" />
@@ -326,30 +446,34 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
         )}
 
         {/* Audio Recording */}
-        {interview.audioRecording && (
+        {(interview.audioRecording || interview.audioUrl) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Audio Recording</Text>
             <View style={styles.infoCard}>
               <View style={styles.audioRow}>
                 <Text style={styles.audioLabel}>Has Audio:</Text>
                 <Text style={styles.audioValue}>
-                  {interview.audioRecording.hasAudio ? 'Yes' : 'No'}
+                  {(interview.audioRecording?.url || interview.audioRecording?.audioUrl || interview.audioUrl) ? 'Yes' : 'No'}
                 </Text>
               </View>
-              {interview.audioRecording.hasAudio && (
+              {(interview.audioRecording?.url || interview.audioRecording?.audioUrl || interview.audioUrl) && (
                 <>
-                  <View style={styles.audioRow}>
-                    <Text style={styles.audioLabel}>Duration:</Text>
-                    <Text style={styles.audioValue}>
-                      {formatDuration(interview.audioRecording.recordingDuration)}
-                    </Text>
-                  </View>
-                  <View style={styles.audioRow}>
-                    <Text style={styles.audioLabel}>File Size:</Text>
-                    <Text style={styles.audioValue}>
-                      {(interview.audioRecording.fileSize / 1024 / 1024).toFixed(2)} MB
-                    </Text>
-                  </View>
+                  {interview.audioRecording?.duration && (
+                    <View style={styles.audioRow}>
+                      <Text style={styles.audioLabel}>Duration:</Text>
+                      <Text style={styles.audioValue}>
+                        {formatDuration(interview.audioRecording.duration)}
+                      </Text>
+                    </View>
+                  )}
+                  {interview.audioRecording?.fileSize && (
+                    <View style={styles.audioRow}>
+                      <Text style={styles.audioLabel}>File Size:</Text>
+                      <Text style={styles.audioValue}>
+                        {(interview.audioRecording.fileSize / 1024 / 1024).toFixed(2)} MB
+                      </Text>
+                    </View>
+                  )}
                   <TouchableOpacity 
                     style={[styles.playButton, isLoadingAudio && styles.disabledButton]} 
                     onPress={handlePlayAudio}

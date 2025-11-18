@@ -36,6 +36,15 @@ let globalRecording: Audio.Recording | null = null;
 export default function InterviewInterface({ navigation, route }: any) {
   const { survey, responseId, isContinuing } = route.params;
   
+  // Helper function to check if an option is "Other", "Others", or "Others (Specify)"
+  const isOthersOption = (optText: string | null | undefined): boolean => {
+    if (!optText) return false;
+    const normalized = optText.toLowerCase().trim();
+    return normalized === 'other' || 
+           normalized === 'others' || 
+           normalized === 'others (specify)';
+  };
+  
   // State management
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [responses, setResponses] = useState<Record<string, any>>({});
@@ -72,6 +81,8 @@ export default function InterviewInterface({ navigation, route }: any) {
   // Quota management state
   const [genderQuotas, setGenderQuotas] = useState<any>(null);
   const [targetAudienceErrors, setTargetAudienceErrors] = useState<Map<string, string>>(new Map());
+  const [othersTextInputs, setOthersTextInputs] = useState<Record<string, string>>({}); // Store "Others" text input values by questionId_optionValue
+  const [shuffledOptions, setShuffledOptions] = useState<Record<string, any[]>>({}); // Store shuffled options per questionId to maintain consistent order
 
   // Get all questions from all sections
   const allQuestions = useMemo(() => {
@@ -153,7 +164,8 @@ export default function InterviewInterface({ navigation, route }: any) {
     if (response === null || response === undefined) return false;
     if (typeof response === 'string') return response.trim().length > 0;
     if (Array.isArray(response)) return response.length > 0;
-    if (typeof response === 'number') return !isNaN(response);
+    if (typeof response === 'number') return !isNaN(response) && isFinite(response); // Allow 0 and negative numbers
+    if (typeof response === 'boolean') return true;
     return true;
   };
 
@@ -332,6 +344,39 @@ export default function InterviewInterface({ navigation, route }: any) {
     return () => clearInterval(interval);
   }, [startTime, isPaused]);
 
+  // Cleanup any existing recording on component mount - ensure clean state
+  useEffect(() => {
+    const cleanupOnMount = async () => {
+      // Always ensure globalRecording is null on mount
+      if (globalRecording) {
+        try {
+          console.log('Cleaning up existing recording on mount...');
+          const status = await globalRecording.getStatusAsync();
+          if (status.isRecording || status.canRecord) {
+            await globalRecording.stopAndUnloadAsync();
+          }
+        } catch (error) {
+          console.log('Cleanup on mount error (non-fatal):', error);
+        }
+        globalRecording = null;
+      }
+      // Also reset audio mode to ensure clean state
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: false,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+        // Wait a bit before allowing new recording
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (error) {
+        console.log('Error resetting audio mode (non-fatal):', error);
+      }
+    };
+    cleanupOnMount();
+  }, []);
+
   // Cleanup recording on component unmount
   useEffect(() => {
     return () => {
@@ -368,7 +413,14 @@ export default function InterviewInterface({ navigation, route }: any) {
     try {
       if (globalRecording) {
         console.log('Cleaning up recording...');
-        await globalRecording.stopAndUnloadAsync();
+        try {
+          const status = await globalRecording.getStatusAsync();
+          if (status.isRecording || status.canRecord) {
+            await globalRecording.stopAndUnloadAsync();
+          }
+        } catch (error) {
+          console.log('Error during cleanup:', error);
+        }
         globalRecording = null;
       }
     } catch (error) {
@@ -377,10 +429,17 @@ export default function InterviewInterface({ navigation, route }: any) {
       setIsRecording(false);
       setIsAudioPaused(false);
       setAudioUri(null);
+      globalRecording = null;
     }
   };
 
   const handleResponseChange = (questionId: string, response: any) => {
+    // Prevent interaction if recording hasn't started (for CAPI mode)
+    const shouldRecordAudio = (survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi');
+    if (shouldRecordAudio && !isRecording && audioPermission !== false) {
+      return; // Block interaction until recording starts
+    }
+    
     setResponses(prev => ({
       ...prev,
       [questionId]: response
@@ -508,18 +567,25 @@ export default function InterviewInterface({ navigation, route }: any) {
   };
 
   const startAudioRecording = async () => {
+    if (isRecording) {
+      console.log('Already recording, skipping...');
+      return;
+    }
+    
     try {
       console.log('=== EXPO-AV AUDIO RECORDING START ===');
       
-      if (isRecording) {
-        console.log('Already recording, skipping...');
-        return;
-      }
-      
-      // Clean up any existing recording
+      // Clean up any existing recording - simple approach like before
       if (globalRecording) {
-        await globalRecording.stopAndUnloadAsync();
+        try {
+          console.log('Cleaning up existing recording...');
+          await globalRecording.stopAndUnloadAsync();
+        } catch (cleanupError) {
+          console.log('Cleanup error (non-fatal):', cleanupError);
+        }
         globalRecording = null;
+        // Wait a bit for native module to release
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
       
       console.log('Requesting audio permissions...');
@@ -536,11 +602,12 @@ export default function InterviewInterface({ navigation, route }: any) {
         playThroughEarpieceAndroid: false,
       });
       
-      console.log('Creating recording...');
+      console.log('Creating new recording object...');
+      // Create a completely new recording object
       const recording = new Audio.Recording();
-      globalRecording = recording;
       
       console.log('Preparing recording...');
+      // Only set globalRecording AFTER successful preparation
       await recording.prepareToRecordAsync({
         android: {
           extension: '.m4a',
@@ -564,6 +631,9 @@ export default function InterviewInterface({ navigation, route }: any) {
         },
       });
       
+      // Only set globalRecording after successful preparation
+      globalRecording = recording;
+      
       console.log('Starting recording...');
       await recording.startAsync();
       
@@ -579,7 +649,15 @@ export default function InterviewInterface({ navigation, route }: any) {
       showSnackbar(`Failed to start recording: ${error.message}`);
       setAudioPermission(false);
       setIsRecording(false);
-      globalRecording = null;
+      // Clean up on error
+      if (globalRecording) {
+        try {
+          await globalRecording.stopAndUnloadAsync();
+        } catch (cleanupError) {
+          console.log('Error cleaning up on failure:', cleanupError);
+        }
+        globalRecording = null;
+      }
     }
   };
 
@@ -743,19 +821,165 @@ export default function InterviewInterface({ navigation, route }: any) {
       }
       
       // Prepare final response data for ALL questions (including skipped ones)
-      const finalResponses = allQuestions.map((question: any, index: number) => ({
-        sectionIndex: 0,
-        questionIndex: index,
-        questionId: question.id,
-        questionType: question.type,
-        questionText: question.text,
-        questionDescription: question.description,
-        questionOptions: question.options?.map((opt: any) => opt.value) || [],
-        response: responses[question.id] || '', // Empty string for skipped questions
-        responseTime: 0,
-        isRequired: question.required,
-        isSkipped: !responses[question.id] // True if no response provided
-      }));
+      const finalResponses = allQuestions.map((question: any, index: number) => {
+        // For multiple_choice with allowMultiple, default to array; otherwise default to empty string
+        const defaultResponse = (question.type === 'multiple_choice' && question.settings?.allowMultiple) ? [] : '';
+        const response = responses[question.id] !== undefined ? responses[question.id] : defaultResponse;
+        
+        // Process response to include option codes and handle "Others" text input
+        // Ensure processedResponse is an array for multiple_choice with allowMultiple
+        let processedResponse: any;
+        if (question.type === 'multiple_choice' && question.settings?.allowMultiple) {
+          // Ensure it's an array - if it's not, try to convert it
+          if (Array.isArray(response)) {
+            processedResponse = response;
+          } else if (response && response !== '') {
+            // If it's a single value, convert to array
+            processedResponse = [response];
+          } else {
+            // Empty array
+            processedResponse = [];
+          }
+        } else {
+          processedResponse = response || '';
+        }
+        let responseCodes: string | string[] | null = null;
+        let responseWithCodes: any = null;
+        
+        // Find "Others" option value for this question
+        const othersOption = question.options?.find((opt: any) => {
+          const optText = opt.text || '';
+          return isOthersOption(optText);
+        });
+        const othersOptionValue = othersOption ? (othersOption.value || othersOption.text) : null;
+        
+        if (question.type === 'multiple_choice' && question.options) {
+          if (Array.isArray(processedResponse)) {
+            // Multiple selection
+            responseCodes = [];
+            responseWithCodes = [];
+            
+            processedResponse.forEach((respValue: string) => {
+              const selectedOption = question.options.find((opt: any) => {
+                const optValue = opt.value || opt.text;
+                return optValue === respValue;
+              });
+              
+              if (selectedOption) {
+                const optText = selectedOption.text || '';
+                const optCode = selectedOption.code || null;
+                const isOthers = isOthersOption(optText);
+                
+                if (isOthers) {
+                  // Get the "Others" text input value
+                  const othersText = othersTextInputs[`${question.id}_${respValue}`] || '';
+                  if (othersText) {
+                    // Save with code but answer is the text input
+                    (responseCodes as string[]).push(optCode || respValue);
+                    (responseWithCodes as any[]).push({
+                      code: optCode || respValue,
+                      answer: othersText,
+                      optionText: optText
+                    });
+                  } else {
+                    // No text provided, just save the option
+                    (responseCodes as string[]).push(optCode || respValue);
+                    (responseWithCodes as any[]).push({
+                      code: optCode || respValue,
+                      answer: optText,
+                      optionText: optText
+                    });
+                  }
+                } else {
+                  // Regular option
+                  (responseCodes as string[]).push(optCode || respValue);
+                  (responseWithCodes as any[]).push({
+                    code: optCode || respValue,
+                    answer: optText,
+                    optionText: optText
+                  });
+                }
+              }
+            });
+          } else {
+            // Single selection
+            const selectedOption = question.options.find((opt: any) => {
+              const optValue = opt.value || opt.text;
+              return optValue === processedResponse;
+            });
+            
+            if (selectedOption) {
+              const optText = selectedOption.text || '';
+              const optCode = selectedOption.code || null;
+              const isOthers = isOthersOption(optText);
+              
+              if (isOthers) {
+                // Get the "Others" text input value
+                const othersText = othersTextInputs[`${question.id}_${processedResponse}`] || '';
+                if (othersText) {
+                  responseCodes = optCode || processedResponse;
+                  responseWithCodes = {
+                    code: optCode || processedResponse,
+                    answer: othersText,
+                    optionText: optText
+                  };
+                } else {
+                  responseCodes = optCode || processedResponse;
+                  responseWithCodes = {
+                    code: optCode || processedResponse,
+                    answer: optText,
+                    optionText: optText
+                  };
+                }
+              } else {
+                responseCodes = optCode || processedResponse;
+                responseWithCodes = {
+                  code: optCode || processedResponse,
+                  answer: optText,
+                  optionText: optText
+                };
+              }
+            }
+          }
+        }
+        
+        // For "Others" option, update the response to include the specified text
+        let finalResponse = processedResponse;
+        if (question.type === 'multiple_choice' && responseWithCodes) {
+          // Check if any response has "Others" with specified text
+          if (Array.isArray(responseWithCodes)) {
+            const othersResponse = responseWithCodes.find((r: any) => r.optionText && isOthersOption(r.optionText) && r.answer !== r.optionText);
+            if (othersResponse) {
+              // Replace the "Others" value with the specified text in the response array
+              finalResponse = (processedResponse as string[]).map((val: string) => {
+                if (val === othersResponse.code || val === othersOptionValue) {
+                  return `Others: ${othersResponse.answer}`;
+                }
+                return val;
+              });
+            }
+          } else if (responseWithCodes.optionText && isOthersOption(responseWithCodes.optionText) && responseWithCodes.answer !== responseWithCodes.optionText) {
+            // Single selection with "Others" specified text
+            finalResponse = `Others: ${responseWithCodes.answer}`;
+          }
+        }
+        
+        return {
+          sectionIndex: 0,
+          questionIndex: index,
+          questionId: question.id,
+          questionType: question.type,
+          questionText: question.text,
+          questionDescription: question.description,
+          questionOptions: question.options?.map((opt: any) => opt.value) || [],
+          response: finalResponse, // Use finalResponse which includes "Others: [specified text]"
+          responseCodes: responseCodes, // Include option codes
+          responseWithCodes: responseWithCodes, // Include structured response with codes
+          responseTime: 0,
+          isRequired: question.required,
+          isSkipped: !response // True if no response provided
+        };
+      });
 
       const result = await apiService.completeInterview(sessionId, {
         responses: finalResponses,
@@ -895,9 +1119,57 @@ export default function InterviewInterface({ navigation, route }: any) {
     return null; // No validation for other questions
   };
 
+  // Fisher-Yates shuffle algorithm for randomizing options
+  const shuffleArray = (array: any[]): any[] => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
+
+  // Get shuffled options for a question (shuffle once, then reuse)
+  // ONLY for multiple_choice questions, and only if shuffleOptions is enabled
+  const getShuffledOptions = (questionId: string, originalOptions: any[], question?: any): any[] => {
+    if (!originalOptions || originalOptions.length === 0) return originalOptions || [];
+    
+    // Check if shuffling is enabled for this question (default to true if not set for backward compatibility)
+    const shouldShuffle = question?.settings?.shuffleOptions !== false;
+    
+    // If shuffling is disabled, return original options
+    if (!shouldShuffle) {
+      return originalOptions;
+    }
+    
+    // If already shuffled for this question, return cached shuffled order
+    if (shuffledOptions[questionId]) {
+      return shuffledOptions[questionId];
+    }
+    
+    // Shuffle options for the first time
+    const shuffled = shuffleArray(originalOptions);
+    setShuffledOptions(prev => ({
+      ...prev,
+      [questionId]: shuffled
+    }));
+    
+    return shuffled;
+  };
+
   // Render question based on type
   const renderQuestion = (question: any) => {
-    const currentResponse = responses[question.id] || '';
+    // For multiple_choice questions with allowMultiple, initialize as array if not set
+    const defaultResponse = (question.type === 'multiple_choice' && question.settings?.allowMultiple) ? [] : '';
+    const currentResponse = responses[question.id] !== undefined ? responses[question.id] : defaultResponse;
+    const questionId = question.id;
+    
+    // Get shuffled options ONLY for multiple_choice questions (if shuffleOptions is enabled)
+    // Dropdown and other question types use original order
+    let displayOptions = question.options;
+    if (question.type === 'multiple_choice') {
+      displayOptions = getShuffledOptions(questionId, question.options || [], question);
+    }
 
     switch (question.type) {
       case 'text':
@@ -915,11 +1187,22 @@ export default function InterviewInterface({ navigation, route }: any) {
         );
 
       case 'number':
+      case 'numeric':
         return (
           <TextInput
             mode="outlined"
-            value={currentResponse?.toString() || ''}
-            onChangeText={(text) => handleResponseChange(question.id, parseFloat(text) || 0)}
+            value={currentResponse !== null && currentResponse !== undefined ? currentResponse.toString() : ''}
+            onChangeText={(text) => {
+              // Allow empty string or valid number (including 0 and negative numbers)
+              if (text === '') {
+                handleResponseChange(question.id, '');
+              } else {
+                const numValue = parseFloat(text);
+                if (!isNaN(numValue) && isFinite(numValue)) {
+                  handleResponseChange(question.id, numValue);
+                }
+              }
+            }}
             placeholder="Enter a number..."
             keyboardType="numeric"
             style={styles.textInput}
@@ -929,12 +1212,48 @@ export default function InterviewInterface({ navigation, route }: any) {
       case 'multiple_choice':
         // Check if multiple selections are allowed
         const allowMultiple = question.settings?.allowMultiple || false;
+        const maxSelections = question.settings?.maxSelections;
+        const currentSelections = Array.isArray(currentResponse) ? currentResponse.length : 0;
+        
+        // Use shuffled options for display
+        const shuffledMultipleChoiceOptions = displayOptions || question.options || [];
+        
+        // Check if "None" option exists
+        const noneOption = shuffledMultipleChoiceOptions.find((opt: any) => {
+          const optText = opt.text || '';
+          return optText.toLowerCase().trim() === 'none';
+        });
+        const noneOptionValue = noneOption ? (noneOption.value || noneOption.text) : null;
+        
+        // Check if "Others" option exists
+        const othersOption = shuffledMultipleChoiceOptions.find((opt: any) => {
+          const optText = opt.text || '';
+          return isOthersOption(optText);
+        });
+        const othersOptionValue = othersOption ? (othersOption.value || othersOption.text) : null;
+        
+        // Check if "Others" is selected
+        const isOthersSelected = allowMultiple 
+          ? (Array.isArray(currentResponse) && currentResponse.includes(othersOptionValue))
+          : (currentResponse === othersOptionValue);
+        
         return (
           <View style={styles.optionsContainer}>
-            {question.options?.map((option: any, index: number) => {
+            {allowMultiple && maxSelections && (
+              <View style={styles.selectionLimitContainer}>
+                <Text style={styles.selectionLimitText}>
+                  Selection limit: {currentSelections} / {maxSelections}
+                </Text>
+              </View>
+            )}
+            {shuffledMultipleChoiceOptions.map((option: any, index: number) => {
+              const optionValue = option.value || option.text;
+              const optionText = option.text || '';
+              const isNoneOption = optionText.toLowerCase().trim() === 'none';
+              const isOthers = isOthersOption(optionText);
               const isSelected = allowMultiple 
-                ? (Array.isArray(currentResponse) && currentResponse.includes(option.value))
-                : (currentResponse === option.value);
+                ? (Array.isArray(currentResponse) && currentResponse.includes(optionValue))
+                : (currentResponse === optionValue);
               
               return (
                 <View key={option.id || index} style={styles.optionItem}>
@@ -942,21 +1261,122 @@ export default function InterviewInterface({ navigation, route }: any) {
                     status={isSelected ? 'checked' : 'unchecked'}
                     onPress={() => {
                       if (allowMultiple) {
-                        const currentAnswers = Array.isArray(currentResponse) ? currentResponse : [];
-                        const newAnswers = currentAnswers.includes(option.value)
-                          ? currentAnswers.filter((a: string) => a !== option.value)
-                          : [...currentAnswers, option.value];
-                        handleResponseChange(question.id, newAnswers);
+                        let currentAnswers = Array.isArray(currentResponse) ? [...currentResponse] : [];
+                        const maxSelections = question.settings?.maxSelections;
+                        
+                        if (currentAnswers.includes(optionValue)) {
+                          // Deselecting
+                          currentAnswers = currentAnswers.filter((a: string) => a !== optionValue);
+                          
+                          // Clear "Others" text input if "Others" is deselected
+                          if (isOthers) {
+                            setOthersTextInputs(prev => {
+                              const updated = { ...prev };
+                              delete updated[`${questionId}_${optionValue}`];
+                              return updated;
+                            });
+                          }
+                        } else {
+                          // Selecting
+                          // Handle "None" option - mutual exclusivity
+                          if (isNoneOption) {
+                            // If "None" is selected, clear all other selections
+                            currentAnswers = [optionValue];
+                            // Clear "Others" text input if it was selected
+                            if (othersOptionValue && currentAnswers.includes(othersOptionValue)) {
+                              setOthersTextInputs(prev => {
+                                const updated = { ...prev };
+                                delete updated[`${questionId}_${othersOptionValue}`];
+                                return updated;
+                              });
+                            }
+                          } else if (isOthers) {
+                            // If "Others" is selected, clear all other selections (mutual exclusivity)
+                            currentAnswers = [optionValue];
+                            // Clear "None" if it exists
+                            if (noneOptionValue && currentAnswers.includes(noneOptionValue)) {
+                              currentAnswers = currentAnswers.filter((a: string) => a !== noneOptionValue);
+                            }
+                          } else {
+                            // If any other option is selected, remove "None" and "Others" if they exist
+                            if (noneOptionValue && currentAnswers.includes(noneOptionValue)) {
+                              currentAnswers = currentAnswers.filter((a: string) => a !== noneOptionValue);
+                            }
+                            if (othersOptionValue && currentAnswers.includes(othersOptionValue)) {
+                              currentAnswers = currentAnswers.filter((a: string) => a !== othersOptionValue);
+                              // Clear "Others" text input
+                              setOthersTextInputs(prev => {
+                                const updated = { ...prev };
+                                delete updated[`${questionId}_${othersOptionValue}`];
+                                return updated;
+                              });
+                            }
+                            
+                            // Check if we've reached the maximum selections limit
+                            if (maxSelections && currentAnswers.length >= maxSelections) {
+                              showSnackbar(`Maximum ${maxSelections} selection${maxSelections > 1 ? 's' : ''} allowed`);
+                              return;
+                            }
+                            currentAnswers.push(optionValue);
+                          }
+                        }
+                        handleResponseChange(question.id, currentAnswers);
                       } else {
-                        // Single selection - use radio button behavior
-                        handleResponseChange(question.id, option.value);
+                        // Single selection
+                        if (isNoneOption) {
+                          // "None" selected - just set it
+                          handleResponseChange(question.id, optionValue);
+                          // Clear "Others" text input if it exists
+                          if (othersOptionValue && currentResponse === othersOptionValue) {
+                            setOthersTextInputs(prev => {
+                              const updated = { ...prev };
+                              delete updated[`${questionId}_${othersOptionValue}`];
+                              return updated;
+                            });
+                          }
+                        } else if (isOthers) {
+                          // "Others" selected - just set it
+                          handleResponseChange(question.id, optionValue);
+                        } else {
+                          // Other option selected - clear "None" and "Others" if they were selected
+                          if (noneOptionValue && currentResponse === noneOptionValue) {
+                            handleResponseChange(question.id, optionValue);
+                          } else if (othersOptionValue && currentResponse === othersOptionValue) {
+                            handleResponseChange(question.id, optionValue);
+                            // Clear "Others" text input
+                            setOthersTextInputs(prev => {
+                              const updated = { ...prev };
+                              delete updated[`${questionId}_${othersOptionValue}`];
+                              return updated;
+                            });
+                          } else {
+                            handleResponseChange(question.id, optionValue);
+                          }
+                        }
                       }
                     }}
                   />
-                  <Text style={styles.optionText}>{option.text}</Text>
+                  <Text style={styles.optionText}>{optionText}</Text>
                 </View>
               );
             })}
+            {/* Show text input for "Others" option when selected */}
+            {isOthersSelected && othersOptionValue && (
+              <View style={styles.othersInputContainer}>
+                <TextInput
+                  mode="outlined"
+                  value={othersTextInputs[`${questionId}_${othersOptionValue}`] || ''}
+                  onChangeText={(text) => {
+                    setOthersTextInputs(prev => ({
+                      ...prev,
+                      [`${questionId}_${othersOptionValue}`]: text
+                    }));
+                  }}
+                  placeholder="Please specify..."
+                  style={styles.othersTextInput}
+                />
+              </View>
+            )}
           </View>
         );
 
@@ -965,9 +1385,12 @@ export default function InterviewInterface({ navigation, route }: any) {
         // Check if this is a gender question for quota display
         const isGenderQuestion = question.id === 'fixed_respondent_gender';
         
+        // Use shuffled options for display
+        const shuffledSingleChoiceOptions = displayOptions || question.options || [];
+        
         return (
           <View style={styles.optionsContainer}>
-            {question.options?.map((option: any, index: number) => {
+            {shuffledSingleChoiceOptions.map((option: any, index: number) => {
               // Get quota information for gender question
               let quotaInfo = null;
               if (isGenderQuestion && genderQuotas) {
@@ -1009,6 +1432,9 @@ export default function InterviewInterface({ navigation, route }: any) {
         );
 
       case 'dropdown':
+        // Use shuffled options for display
+        const shuffledDropdownOptions = displayOptions || question.options || [];
+        
         return (
           <View style={styles.dropdownContainer}>
             <Text style={styles.dropdownText}>
@@ -1021,10 +1447,10 @@ export default function InterviewInterface({ navigation, route }: any) {
                 Alert.alert(
                   'Select Option',
                   'Choose an option:',
-                  question.options?.map((option: any) => ({
+                  shuffledDropdownOptions.map((option: any) => ({
                     text: option.text,
                     onPress: () => handleResponseChange(question.id, option.value)
-                  })) || []
+                  }))
                 );
               }}
               style={styles.dropdownButton}
@@ -1037,23 +1463,46 @@ export default function InterviewInterface({ navigation, route }: any) {
       case 'rating':
       case 'rating_scale':
         const scale = question.scale || { min: 1, max: 5 };
+        const min = scale.min || 1;
+        const max = scale.max || 5;
+        const labels = scale.labels || [];
+        const minLabel = scale.minLabel || '';
+        const maxLabel = scale.maxLabel || '';
         const ratings = [];
-        for (let i = scale.min; i <= scale.max; i++) {
+        for (let i = min; i <= max; i++) {
           ratings.push(i);
         }
         return (
           <View style={styles.ratingContainer}>
-            {ratings.map((rating) => (
-              <Button
-                key={rating}
-                mode={currentResponse === rating ? 'contained' : 'outlined'}
-                onPress={() => handleResponseChange(question.id, rating)}
-                style={styles.ratingButton}
-                compact
-              >
-                {rating}
-              </Button>
-            ))}
+            <View style={styles.ratingButtonsRow}>
+              {ratings.map((rating) => {
+                const label = labels[rating - min] || '';
+                return (
+                  <View key={rating} style={styles.ratingButtonWrapper}>
+                    <Button
+                      mode={currentResponse === rating ? 'contained' : 'outlined'}
+                      onPress={() => handleResponseChange(question.id, rating)}
+                      style={[
+                        styles.ratingButton,
+                        currentResponse === rating && styles.ratingButtonSelected
+                      ]}
+                      compact
+                    >
+                      {rating}
+                    </Button>
+                    {label ? (
+                      <Text style={styles.ratingLabel}>{label}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+            {(minLabel || maxLabel) && (
+              <View style={styles.ratingLabelsRow}>
+                <Text style={styles.ratingScaleLabel}>{minLabel}</Text>
+                <Text style={styles.ratingScaleLabel}>{maxLabel}</Text>
+              </View>
+            )}
           </View>
         );
 
@@ -1128,7 +1577,7 @@ export default function InterviewInterface({ navigation, route }: any) {
         <View style={styles.headerTop}>
           <Button
             mode="text"
-            onPress={() => navigation.goBack()}
+            onPress={() => setShowAbandonConfirm(true)}
             icon="arrow-left"
           >
             Back
@@ -1169,6 +1618,51 @@ export default function InterviewInterface({ navigation, route }: any) {
           </View>
         </View>
         
+        {/* Recording Indicator and Location (compact) - Separate line */}
+        <View style={styles.headerStatusRow}>
+          {/* Recording Indicator */}
+          {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && (
+            <View style={styles.recordingIndicator}>
+              <View style={[
+                styles.recordingDotSmall,
+                {
+                  backgroundColor: audioPermission === false 
+                    ? '#ef4444'
+                    : isRecording 
+                      ? (isAudioPaused ? '#fbbf24' : '#ef4444') 
+                      : '#6b7280'
+                }
+              ]} />
+              <Text style={styles.recordingStatusTextSmall}>
+                {audioPermission === false 
+                  ? 'No Permission'
+                  : isRecording 
+                    ? (isAudioPaused ? 'Paused' : 'Recording') 
+                    : 'Ready'
+                }
+              </Text>
+            </View>
+          )}
+          
+            {/* Location (only for first question) */}
+            {currentQuestionIndex === 0 && (
+              <>
+                {locationLoading ? (
+                  <View style={styles.locationIndicator}>
+                    <ActivityIndicator size="small" color="#2563eb" />
+                    <Text style={styles.locationTextSmall}>Getting location...</Text>
+                  </View>
+                ) : locationData && locationData.address ? (
+                  <View style={styles.locationIndicator}>
+                    <Text style={styles.locationTextSmall} numberOfLines={1}>
+                      📍 {locationData.address}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
+        </View>
+        
         <View style={styles.headerInfo}>
           <Text style={styles.surveyTitle}>{survey.surveyName}</Text>
           <Text style={styles.progressText}>
@@ -1183,6 +1677,29 @@ export default function InterviewInterface({ navigation, route }: any) {
       <ScrollView style={styles.content}>
         <Card style={styles.questionCard}>
           <Card.Content>
+            {/* Show loading/blocking overlay if recording hasn't started */}
+            {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+             !isRecording && audioPermission !== false && (
+              <View style={styles.blockingOverlay}>
+                <View style={styles.blockingContent}>
+                  <ActivityIndicator size="large" color="#2563eb" />
+                  <Text style={styles.blockingText}>Waiting for recording to start...</Text>
+                  <Text style={styles.blockingSubtext}>Please wait while we initialize the audio recording</Text>
+                </View>
+              </View>
+            )}
+            
+            {/* Show permission denied message */}
+            {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+             audioPermission === false && (
+              <View style={styles.blockingOverlay}>
+                <View style={styles.blockingContent}>
+                  <Text style={styles.blockingText}>Audio Permission Required</Text>
+                  <Text style={styles.blockingSubtext}>Please grant audio recording permission to continue</Text>
+                </View>
+              </View>
+            )}
+            
             <Text style={styles.questionText}>{currentQuestion.text}</Text>
             {currentQuestion.description && (
               <Text style={styles.questionDescription}>{currentQuestion.description}</Text>
@@ -1191,7 +1708,14 @@ export default function InterviewInterface({ navigation, route }: any) {
               <Text style={styles.requiredText}>* Required</Text>
             )}
             
-            {renderQuestion(currentQuestion)}
+            <View style={[
+              styles.questionContent,
+              (!isRecording && audioPermission !== false && 
+               ((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi'))) && 
+              styles.disabledContent
+            ]}>
+              {renderQuestion(currentQuestion)}
+            </View>
             
             {/* Target Audience Validation Error */}
             {targetAudienceErrors.has(currentQuestion.id) && (
@@ -1203,58 +1727,6 @@ export default function InterviewInterface({ navigation, route }: any) {
             )}
           </Card.Content>
         </Card>
-
-        {/* Location Status */}
-        {locationLoading && (
-          <Card style={styles.statusCard}>
-            <Card.Content>
-              <View style={styles.statusRow}>
-                <ActivityIndicator size="small" color="#2563eb" />
-                <Text style={styles.statusText}>Getting location...</Text>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {locationData && (
-          <Card style={styles.statusCard}>
-            <Card.Content>
-              <View style={styles.statusRow}>
-                <Text style={styles.statusText}>📍 Location: {locationData.address}</Text>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* Audio Recording Indicator */}
-        {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && (
-          <Card style={styles.audioCard}>
-            <Card.Content>
-              <View style={styles.audioHeader}>
-                <View style={styles.audioIndicator}>
-                  <View style={[
-                    styles.recordingDot,
-                    {
-                      backgroundColor: audioPermission === false 
-                        ? '#ef4444'
-                        : isRecording 
-                          ? (isAudioPaused ? '#fbbf24' : '#ef4444') 
-                          : '#6b7280'
-                    }
-                  ]} />
-                  <Text style={styles.audioStatusText}>
-                    {audioPermission === false 
-                      ? 'Audio Permission Denied'
-                      : isRecording 
-                        ? (isAudioPaused ? 'Audio Paused' : 'Recording') 
-                        : 'Audio Ready'
-                    }
-                  </Text>
-                </View>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
       </ScrollView>
 
       {/* Navigation */}
@@ -1262,7 +1734,9 @@ export default function InterviewInterface({ navigation, route }: any) {
         <Button
           mode="outlined"
           onPress={goToPreviousQuestion}
-          disabled={currentQuestionIndex === 0}
+          disabled={currentQuestionIndex === 0 || 
+                   (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                    !isRecording && audioPermission !== false)}
           style={styles.navButton}
         >
           Previous
@@ -1274,9 +1748,13 @@ export default function InterviewInterface({ navigation, route }: any) {
             onPress={completeInterview}
             style={[
               styles.completeButton,
-              targetAudienceErrors.size > 0 && styles.disabledButton
+              (targetAudienceErrors.size > 0 || 
+               (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                !isRecording && audioPermission !== false)) && styles.disabledButton
             ]}
-            disabled={targetAudienceErrors.size > 0}
+            disabled={targetAudienceErrors.size > 0 || 
+                     (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                      !isRecording && audioPermission !== false)}
             loading={isLoading}
           >
             Complete Interview
@@ -1287,26 +1765,30 @@ export default function InterviewInterface({ navigation, route }: any) {
             onPress={goToNextQuestion}
             style={[
               styles.nextButton,
-              (targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) || 
+              ((targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) || 
                (visibleQuestions[currentQuestionIndex]?.required && 
-                !responses[visibleQuestions[currentQuestionIndex]?.id])) && styles.disabledButton
+                !responses[visibleQuestions[currentQuestionIndex]?.id])) ||
+               (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                !isRecording && audioPermission !== false)) && styles.disabledButton
             ]}
             disabled={targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) || 
                      (visibleQuestions[currentQuestionIndex]?.required && 
-                      !responses[visibleQuestions[currentQuestionIndex]?.id])}
+                      !responses[visibleQuestions[currentQuestionIndex]?.id]) ||
+                     (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
+                      !isRecording && audioPermission !== false)}
           >
             Next
           </Button>
         )}
       </View>
 
-      {/* Abandon Confirmation Modal */}
+      {/* Abandon/Exit Confirmation Modal */}
       {showAbandonConfirm && (
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Abandon Interview</Text>
+            <Text style={styles.modalTitle}>Leave Interview</Text>
             <Text style={styles.modalText}>
-              Are you sure you want to abandon this interview? All progress will be lost.
+              Are you sure you want to leave this interview? All progress will be lost.
             </Text>
             <View style={styles.modalButtons}>
               <Button
@@ -1324,7 +1806,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                 }}
                 style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
               >
-                Abandon
+                Leave
               </Button>
             </View>
           </View>
@@ -1382,7 +1864,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  headerStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  recordingDotSmall: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  recordingStatusTextSmall: {
+    fontSize: 11,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  locationIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    maxWidth: 200,
+    gap: 6,
+  },
+  locationTextSmall: {
+    fontSize: 11,
+    color: '#374151',
+    fontWeight: '500',
   },
   headerActions: {
     flexDirection: 'row',
@@ -1423,6 +1946,43 @@ const styles = StyleSheet.create({
   questionCard: {
     marginBottom: 16,
     elevation: 2,
+    position: 'relative',
+  },
+  blockingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    zIndex: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  blockingContent: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  blockingText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  blockingSubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  questionContent: {
+    position: 'relative',
+  },
+  disabledContent: {
+    opacity: 0.5,
+    pointerEvents: 'none',
   },
   questionText: {
     fontSize: 18,
@@ -1445,6 +2005,19 @@ const styles = StyleSheet.create({
   textInput: {
     marginTop: 8,
   },
+  selectionLimitContainer: {
+    backgroundColor: '#dbeafe',
+    borderColor: '#93c5fd',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  selectionLimitText: {
+    fontSize: 14,
+    color: '#1e40af',
+    fontWeight: '500',
+  },
   optionsContainer: {
     marginTop: 8,
   },
@@ -1459,6 +2032,14 @@ const styles = StyleSheet.create({
     color: '#374151',
     marginLeft: 8,
     flex: 1,
+  },
+  othersInputContainer: {
+    marginLeft: 40,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  othersTextInput: {
+    marginTop: 0,
   },
   dropdownContainer: {
     marginTop: 8,
@@ -1477,14 +2058,41 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   ratingContainer: {
+    marginTop: 16,
+  },
+  ratingButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginTop: 16,
     flexWrap: 'wrap',
+    marginBottom: 8,
   },
-  ratingButton: {
+  ratingButtonWrapper: {
+    alignItems: 'center',
     marginHorizontal: 4,
     marginVertical: 4,
+  },
+  ratingButton: {
+    minWidth: 50,
+  },
+  ratingButtonSelected: {
+    backgroundColor: '#fbbf24',
+  },
+  ratingLabel: {
+    fontSize: 10,
+    color: '#6b7280',
+    marginTop: 4,
+    textAlign: 'center',
+    maxWidth: 60,
+  },
+  ratingLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  ratingScaleLabel: {
+    fontSize: 12,
+    color: '#6b7280',
   },
   unsupportedContainer: {
     padding: 20,
