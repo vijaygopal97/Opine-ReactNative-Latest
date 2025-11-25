@@ -395,7 +395,9 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
         onPress={() => navigation.navigate('AvailableSurveys')}
         label="Start Interview"
         iconColor="#ffffff"
-        labelTextColor="#ffffff"
+        color="#ffffff"
+        labelStyle={styles.fabLabel}
+        theme={{ colors: { onSurface: '#ffffff', onPrimary: '#ffffff' } }}
       />
 
       <Snackbar
@@ -644,6 +646,10 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: '#2563eb',
+  },
+  fabLabel: {
+    color: '#ffffff',
+    fontWeight: '600',
   },
   snackbar: {
     backgroundColor: '#dc2626',

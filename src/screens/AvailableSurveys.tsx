@@ -112,18 +112,8 @@ export default function AvailableSurveys({ navigation }: any) {
   const handleStartInterview = (survey: Survey) => {
     // Check if this is a multi-mode survey with CAPI assignment
     if (survey.mode === 'multi_mode' && survey.assignedMode === 'capi') {
-      Alert.alert(
-        'CAPI Interview',
-        `This is a CAPI (Computer-Assisted Personal Interviewing) interview for "${survey.surveyName}". You can start the interview using the mobile app.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              navigation.navigate('InterviewInterface', { survey });
-            },
-          },
-        ]
-      );
+      // Directly navigate to interview interface for CAPI interviews
+      navigation.navigate('InterviewInterface', { survey });
     } else if (survey.mode === 'multi_mode' && survey.assignedMode === 'cati') {
       Alert.alert(
         'CATI Interview',
