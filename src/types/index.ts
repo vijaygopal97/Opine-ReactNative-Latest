@@ -110,10 +110,14 @@ export interface SurveyResponse {
   interviewerId: string;
   interviewer: User;
   responses: ResponseData[];
-  status: 'in_progress' | 'completed' | 'submitted';
-  startedAt: string;
-  completedAt?: string;
+  status: 'in_progress' | 'completed' | 'submitted' | 'Pending_Approval' | 'Approved' | 'Rejected' | 'abandoned';
+  startTime?: string | Date; // Backend returns startTime
+  startedAt?: string | Date; // Legacy field for compatibility
+  endTime?: string | Date; // Backend returns endTime
+  completedAt?: string | Date; // Legacy field for compatibility
   submittedAt?: string;
+  totalTimeSpent?: number; // Backend returns totalTimeSpent (in seconds)
+  totalDuration?: number; // Legacy field for compatibility
   locationData?: LocationData;
   location?: LocationData;
   audioUrl?: string;
@@ -124,9 +128,11 @@ export interface SurveyResponse {
     format?: string;
     duration?: number;
   };
-  totalDuration?: number;
   createdAt: string;
   updatedAt: string;
+  responseId?: string;
+  sessionId?: string;
+  interviewMode?: 'capi' | 'cati' | 'online';
 }
 
 export interface ResponseData {

@@ -144,16 +144,28 @@ export default function MyInterviews({ navigation }: any) {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const formatDate = (dateString: string | Date | undefined) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+      if (isNaN(date.getTime())) {
+        return 'N/A';
+      }
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'N/A';
+    }
   };
 
   const formatDuration = (seconds?: number) => {
-    if (!seconds) return 'Unknown';
+    if (!seconds || isNaN(seconds)) return 'N/A';
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
-    return `${minutes}m ${remainingSeconds}s`;
+    if (minutes > 0) {
+      return `${minutes}m ${remainingSeconds}s`;
+    }
+    return `${remainingSeconds}s`;
   };
 
   if (isLoading) {
@@ -264,17 +276,23 @@ export default function MyInterviews({ navigation }: any) {
                 <View style={styles.interviewMeta}>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>Started</Text>
-                    <Text style={styles.metaValue}>{formatDate(interview.startedAt)}</Text>
+                    <Text style={styles.metaValue}>
+                      {formatDate(interview.startTime || interview.startedAt || interview.createdAt)}
+                    </Text>
                   </View>
-                  {interview.completedAt && (
+                  {(interview.endTime || interview.completedAt) && (
                     <View style={styles.metaItem}>
                       <Text style={styles.metaLabel}>Completed</Text>
-                      <Text style={styles.metaValue}>{formatDate(interview.completedAt)}</Text>
+                      <Text style={styles.metaValue}>
+                        {formatDate(interview.endTime || interview.completedAt)}
+                      </Text>
                     </View>
                   )}
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>Duration</Text>
-                    <Text style={styles.metaValue}>{formatDuration(interview.totalDuration)}</Text>
+                    <Text style={styles.metaValue}>
+                      {formatDuration(interview.totalTimeSpent || interview.totalDuration)}
+                    </Text>
                   </View>
                 </View>
 

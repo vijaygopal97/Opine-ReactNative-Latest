@@ -243,9 +243,12 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
   const findQuestionByText = (questionText: string, survey: any) => {
     if (!survey || !questionText) return null;
     
+    // Handle nested survey structure
+    const actualSurvey = survey.survey || survey;
+    
     // Search in sections
-    if (survey.sections) {
-      for (const section of survey.sections) {
+    if (actualSurvey.sections) {
+      for (const section of actualSurvey.sections) {
         if (section.questions) {
           for (const question of section.questions) {
             if (question.text === questionText || question.questionText === questionText) {
@@ -257,8 +260,8 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
     }
     
     // Search in top-level questions
-    if (survey.questions) {
-      for (const question of survey.questions) {
+    if (actualSurvey.questions) {
+      for (const question of actualSurvey.questions) {
         if (question.text === questionText || question.questionText === questionText) {
           return question;
         }
@@ -266,6 +269,118 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
     }
     
     return null;
+  };
+
+  // Helper function to find question by keywords in survey
+  const findQuestionByKeywords = (keywords: string[], survey: any) => {
+    if (!survey) return null;
+    
+    const actualSurvey = survey.survey || survey;
+    const allQuestions: any[] = [];
+    
+    // Collect all questions
+    if (actualSurvey.sections) {
+      actualSurvey.sections.forEach((section: any) => {
+        if (section.questions) {
+          allQuestions.push(...section.questions);
+        }
+      });
+    }
+    if (actualSurvey.questions) {
+      allQuestions.push(...actualSurvey.questions);
+    }
+    
+    // Find question matching keywords
+    const keywordsLower = keywords.map(k => k.toLowerCase());
+    return allQuestions.find((q: any) => {
+      const questionText = (q.text || '').toLowerCase();
+      return keywordsLower.some(keyword => questionText.includes(keyword));
+    });
+  };
+
+  // Helper function to get failed questions from verification criteria
+  const getFailedQuestions = (verificationData: any, survey: any) => {
+    if (!verificationData || !verificationData.criteria) return [];
+    
+    const criteria = verificationData.criteria;
+    const failedQuestions: Array<{ criterion: string; questionText: string; reason: string }> = [];
+    
+    // Map criteria to question types and check if they failed
+    // Based on getApprovalStatus logic from SurveyApprovals.jsx
+    
+    // Audio Status - fails if not '1', '4', or '7'
+    if (criteria.audioStatus && !['1', '4', '7'].includes(criteria.audioStatus)) {
+      failedQuestions.push({
+        criterion: 'audioStatus',
+        questionText: 'Audio Quality',
+        reason: 'Audio quality did not match'
+      });
+    }
+    
+    // Gender Matching - fails if not '1'
+    if (criteria.genderMatching && criteria.genderMatching !== '1') {
+      const genderQuestion = findQuestionByKeywords(['gender'], survey) || 
+                            findQuestionByText('What is your gender?', survey);
+      failedQuestions.push({
+        criterion: 'genderMatching',
+        questionText: genderQuestion?.text || 'Gender question',
+        reason: 'Gender response did not match'
+      });
+    }
+    
+    // Upcoming Elections Matching - fails if not '1' or '3'
+    if (criteria.upcomingElectionsMatching && !['1', '3'].includes(criteria.upcomingElectionsMatching)) {
+      const upcomingElectionsQuestion = findQuestionByKeywords(['upcoming', 'election', 'tomorrow', 'assembly election'], survey);
+      failedQuestions.push({
+        criterion: 'upcomingElectionsMatching',
+        questionText: upcomingElectionsQuestion?.text || 'Upcoming elections question',
+        reason: 'Upcoming elections response did not match'
+      });
+    }
+    
+    // Previous Elections Matching - fails if not '1' or '3'
+    if (criteria.previousElectionsMatching && !['1', '3'].includes(criteria.previousElectionsMatching)) {
+      const previousElectionsQuestion = findQuestionByKeywords(['previous', 'election', 'last assembly', 'voted'], survey);
+      failedQuestions.push({
+        criterion: 'previousElectionsMatching',
+        questionText: previousElectionsQuestion?.text || 'Previous elections question',
+        reason: 'Previous elections response did not match'
+      });
+    }
+    
+    // Previous Lok Sabha Elections Matching - fails if not '1' or '3'
+    if (criteria.previousLoksabhaElectionsMatching && !['1', '3'].includes(criteria.previousLoksabhaElectionsMatching)) {
+      const loksabhaQuestion = findQuestionByKeywords(['lok sabha', 'loksabha', 'parliamentary'], survey);
+      failedQuestions.push({
+        criterion: 'previousLoksabhaElectionsMatching',
+        questionText: loksabhaQuestion?.text || 'Previous Lok Sabha elections question',
+        reason: 'Previous Lok Sabha elections response did not match'
+      });
+    }
+    
+    // Name Matching - fails if not '1' or '3'
+    if (criteria.nameMatching && !['1', '3'].includes(criteria.nameMatching)) {
+      const nameQuestion = findQuestionByText('What is your full name?', survey) ||
+                           findQuestionByKeywords(['name', 'full name'], survey);
+      failedQuestions.push({
+        criterion: 'nameMatching',
+        questionText: nameQuestion?.text || 'Name question',
+        reason: 'Name response did not match'
+      });
+    }
+    
+    // Age Matching - fails if not '1' or '3'
+    if (criteria.ageMatching && !['1', '3'].includes(criteria.ageMatching)) {
+      const ageQuestion = findQuestionByText('Could you please tell me your age in complete years?', survey) ||
+                          findQuestionByKeywords(['age', 'year'], survey);
+      failedQuestions.push({
+        criterion: 'ageMatching',
+        questionText: ageQuestion?.text || 'Age question',
+        reason: 'Age response did not match'
+      });
+    }
+    
+    return failedQuestions;
   };
 
   const renderResponseItem = (response: any, index: number) => {
@@ -538,6 +653,48 @@ const InterviewDetails: React.FC<InterviewDetailsProps> = ({ route, navigation }
                   <Text style={styles.verificationValue}>{interview.verificationData.feedback}</Text>
                 </View>
               )}
+            </View>
+          </View>
+        )}
+
+        {/* Rejection Reason - Only show if status is Rejected */}
+        {interview.status === 'Rejected' && interview.verificationData && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Rejection Reason</Text>
+            <View style={[styles.infoCard, { backgroundColor: '#fef2f2', borderColor: '#fecaca', borderWidth: 1 }]}>
+              {interview.verificationData.feedback && (
+                <View style={styles.verificationRow}>
+                  <Text style={[styles.verificationLabel, { color: '#991b1b' }]}>Reason:</Text>
+                  <Text style={[styles.verificationValue, { color: '#7f1d1d', flex: 1, textAlign: 'right' }]}>
+                    {interview.verificationData.feedback}
+                  </Text>
+                </View>
+              )}
+              {(() => {
+                const failedQuestions = getFailedQuestions(interview.verificationData, interview.survey);
+                if (failedQuestions.length > 0) {
+                  return (
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={[styles.verificationLabel, { color: '#991b1b', marginBottom: 8, fontWeight: '600' }]}>
+                        Questions that failed quality review:
+                      </Text>
+                      {failedQuestions.map((failed, index) => (
+                        <View key={index} style={{ marginBottom: 8, paddingLeft: 8 }}>
+                          <Text style={[styles.verificationValue, { color: '#7f1d1d', fontWeight: '500' }]}>
+                            • {failed.questionText}
+                          </Text>
+                          {failed.reason && (
+                            <Text style={[styles.verificationValue, { color: '#991b1b', fontSize: 12, marginTop: 2, marginLeft: 8 }]}>
+                              {failed.reason}
+                            </Text>
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  );
+                }
+                return null;
+              })()}
             </View>
           </View>
         )}
