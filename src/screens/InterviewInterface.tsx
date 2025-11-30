@@ -43,7 +43,12 @@ let globalRecording: Audio.Recording | null = null;
 let isStartingRecording = false;
 
 export default function InterviewInterface({ navigation, route }: any) {
-  const { survey, responseId, isContinuing } = route.params;
+  const { survey, responseId, isContinuing, isCatiMode: routeIsCatiMode } = route.params;
+  
+  // Determine if this is CATI mode
+  const isCatiMode = routeIsCatiMode !== undefined 
+    ? routeIsCatiMode 
+    : survey.mode === 'cati' || survey.assignedMode === 'cati';
   
   // Helper function to check if an option is "Other", "Others", or "Others (Specify)"
   const isOthersOption = (optText: string | null | undefined): boolean => {
@@ -130,6 +135,16 @@ export default function InterviewInterface({ navigation, route }: any) {
   const [othersTextInputs, setOthersTextInputs] = useState<Record<string, string>>({}); // Store "Others" text input values by questionId_optionValue
   const [shuffledOptions, setShuffledOptions] = useState<Record<string, any[]>>({}); // Store shuffled options per questionId to maintain consistent order
   const scrollViewRef = React.useRef<ScrollView>(null); // Ref for ScrollView to scroll to top
+  
+  // CATI interview state
+  const [catiQueueId, setCatiQueueId] = useState<string | null>(null);
+  const [catiRespondent, setCatiRespondent] = useState<any>(null);
+  const [callStatus, setCallStatus] = useState<'idle' | 'calling' | 'connected' | 'failed' | null>(null);
+  const [callId, setCallId] = useState<string | null>(null);
+  const [showAbandonModal, setShowAbandonModal] = useState(false);
+  const [abandonReason, setAbandonReason] = useState<string>('');
+  const [abandonNotes, setAbandonNotes] = useState<string>('');
+  const [callLaterDate, setCallLaterDate] = useState<string>('');
 
   // Get all questions from all sections
   const allQuestions = useMemo(() => {
@@ -347,61 +362,193 @@ export default function InterviewInterface({ navigation, route }: any) {
     const initializeInterview = async () => {
       setIsLoading(true);
       try {
-        // Get location
-        setLocationLoading(true);
-        const location = await LocationService.getCurrentLocation();
-        setLocationData(location);
-        setLocationLoading(false);
-
         // Start timing
         setStartTime(new Date());
 
-        // Start interview session
-        const result = await apiService.startInterview(survey._id);
-        if (result.success) {
-          setSessionId(result.response.sessionId);
-          setSessionData(result.response);
+        if (isCatiMode) {
+          // CATI mode - use CATI-specific endpoint
+          console.log('Starting CATI interview...');
+          const result = await apiService.startCatiInterview(survey._id);
+          
+          // First check if the API call was successful
+          if (!result.success) {
+            // Interview failed to start - show error and navigate back
+            const errorMsg = result.message || result.data?.message || 'Failed to start CATI interview';
+            Alert.alert(
+              'Cannot Start Interview',
+              errorMsg,
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    navigation.goBack();
+                  }
+                }
+              ]
+            );
+            return; // Exit early - don't start the interview
+          }
+          
+          // If success is true, check if we have valid data with respondent
+          if (!result.data) {
+            console.error('❌ No data received from server');
+            const errorMsg = 'No data received from server. Please try again.';
+            Alert.alert(
+              'Cannot Start Interview',
+              errorMsg,
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    navigation.goBack();
+                  }
+                }
+              ]
+            );
+            return; // Exit early - don't start the interview
+          }
+          
+          const data = result.data;
+          console.log('📋 Received data from API:', JSON.stringify(data, null, 2));
+          console.log('📋 Respondent data:', data.respondent);
+          
+          // Check if respondent is available (this is the critical check)
+          if (!data.respondent) {
+            console.error('❌ No respondent object in data');
+            const errorMsg = result.message || data.message || 'No respondent available. Please try again later.';
+            Alert.alert(
+              'No Respondent Available',
+              errorMsg,
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    navigation.goBack();
+                  }
+                }
+              ]
+            );
+            return; // Exit early - don't start the interview
+          }
+          
+          if (!data.respondent.id) {
+            console.error('❌ Respondent object exists but no ID:', data.respondent);
+            const errorMsg = result.message || data.message || 'No respondent ID available. Please try again later.';
+            Alert.alert(
+              'No Respondent Available',
+              errorMsg,
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    navigation.goBack();
+                  }
+                }
+              ]
+            );
+            return; // Exit early - don't start the interview
+          }
+          
+          // All checks passed - proceed with starting the interview
+          console.log('✅ CATI Interview starting with respondent:', data.respondent);
+          console.log('✅ Queue ID:', data.respondent.id);
+          
+          setSessionId(data.sessionId);
+          setSessionData(data);
+          setCatiQueueId(data.respondent.id); // This is the queue entry ID
+          setCatiRespondent(data.respondent);
           setIsInterviewActive(true);
           
           // Check for AC assignment
-          console.log('Session data loaded:', result.response);
-          const needsACSelection = result.response.requiresACSelection && 
-                                   result.response.assignedACs && 
-                                   result.response.assignedACs.length > 0;
-          
-          console.log('AC Selection required:', needsACSelection);
-          console.log('Assigned ACs:', result.response.assignedACs);
+          const needsACSelection = data.requiresACSelection && 
+                                   data.assignedACs && 
+                                   data.assignedACs.length > 0;
           
           setRequiresACSelection(needsACSelection);
-          setAssignedACs(result.response.assignedACs || []);
+          setAssignedACs(data.assignedACs || []);
           
-          // Start audio recording automatically for CAPI mode (both single-mode and multi-mode)
-          const shouldRecordAudio = (survey.mode === 'capi') || 
-                                   (survey.mode === 'multi_mode' && survey.assignedMode === 'capi');
-          
-          if (shouldRecordAudio && !isRecording) {
-            console.log('Auto-starting audio recording for CAPI mode...');
-            console.log('Survey mode:', survey.mode, 'Assigned mode:', survey.assignedMode);
-            // Add a delay to ensure component is fully mounted and ready
-            // Permission will be requested inside startAudioRecording
-            setTimeout(() => {
-              console.log('Attempting to start recording after delay...');
-              startAudioRecording();
-            }, 2000);
-          }
+          // Auto-make call after a short delay
+          // Use the respondent ID directly from data, not from state (to avoid timing issues)
+          setTimeout(() => {
+            console.log('📞 Attempting to make call with queue ID:', data.respondent.id);
+            if (data.respondent && data.respondent.id) {
+              // Call the API directly with the queue ID from data
+              apiService.makeCallToRespondent(data.respondent.id)
+                .then((callResult) => {
+                  console.log('📞 Call result:', callResult);
+                  if (callResult.success && callResult.data) {
+                    setCallId(callResult.data.callId);
+                    setCallStatus('connected'); // Set to 'connected' to show "Call Started" instead of loading
+                    showSnackbar('Call initiated successfully');
+                  } else {
+                    setCallStatus('failed');
+                    const errorMsg = callResult.message || 'Failed to initiate call';
+                    showSnackbar(`Call failed: ${errorMsg}. You can abandon this interview.`);
+                  }
+                })
+                .catch((error: any) => {
+                  console.error('📞 Error making call:', error);
+                  setCallStatus('failed');
+                  const errorMsg = error.response?.data?.message || error.message || 'Failed to make call';
+                  showSnackbar(`Call failed: ${errorMsg}. You can abandon this interview.`);
+                });
+            } else {
+              console.error('❌ No respondent ID available for call');
+              setCallStatus('failed');
+              showSnackbar('No respondent ID available. Cannot make call.');
+            }
+          }, 1500);
         } else {
-          showSnackbar('Failed to start interview');
+          // CAPI mode - get location and start normal interview
+          setLocationLoading(true);
+          const location = await LocationService.getCurrentLocation();
+          setLocationData(location);
+          setLocationLoading(false);
+
+          // Start interview session
+          const result = await apiService.startInterview(survey._id);
+          if (result.success) {
+            setSessionId(result.response.sessionId);
+            setSessionData(result.response);
+            setIsInterviewActive(true);
+            
+            // Check for AC assignment
+            console.log('Session data loaded:', result.response);
+            const needsACSelection = result.response.requiresACSelection && 
+                                     result.response.assignedACs && 
+                                     result.response.assignedACs.length > 0;
+            
+            console.log('AC Selection required:', needsACSelection);
+            console.log('Assigned ACs:', result.response.assignedACs);
+            
+            setRequiresACSelection(needsACSelection);
+            setAssignedACs(result.response.assignedACs || []);
+            
+            // Start audio recording automatically for CAPI mode
+            const shouldRecordAudio = (survey.mode === 'capi') || 
+                                     (survey.mode === 'multi_mode' && survey.assignedMode === 'capi');
+            
+            if (shouldRecordAudio && !isRecording) {
+              console.log('Auto-starting audio recording for CAPI mode...');
+              setTimeout(() => {
+                startAudioRecording();
+              }, 2000);
+            }
+          } else {
+            showSnackbar('Failed to start interview');
+          }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error initializing interview:', error);
-        showSnackbar('Failed to initialize interview');
+        const errorMsg = error.response?.data?.message || error.message || 'Failed to initialize interview';
+        showSnackbar(errorMsg);
       } finally {
         setIsLoading(false);
       }
     };
 
     initializeInterview();
-  }, [survey._id]); // Only depend on survey ID, not audioPermission to prevent multiple calls
+  }, [survey._id, isCatiMode]); // Include isCatiMode in dependencies
 
   // Update duration
   useEffect(() => {
@@ -711,10 +858,12 @@ export default function InterviewInterface({ navigation, route }: any) {
   };
 
   const handleResponseChange = (questionId: string, response: any) => {
-    // Prevent interaction if recording hasn't started (for CAPI mode)
-    const shouldRecordAudio = (survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi');
-    if (shouldRecordAudio && !isRecording && audioPermission !== false) {
-      return; // Block interaction until recording starts
+    // Prevent interaction if recording hasn't started (for CAPI mode only)
+    if (!isCatiMode) {
+      const shouldRecordAudio = (survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi');
+      if (shouldRecordAudio && !isRecording && audioPermission !== false) {
+        return; // Block interaction until recording starts
+      }
     }
     
     setResponses(prev => ({
@@ -896,16 +1045,85 @@ export default function InterviewInterface({ navigation, route }: any) {
     }
   };
 
+  // Make call to respondent (CATI mode)
+  const makeCallToRespondent = async () => {
+    if (!catiQueueId) {
+      showSnackbar('No respondent assigned');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setCallStatus('calling');
+      
+      const result = await apiService.makeCallToRespondent(catiQueueId);
+      
+      if (result.success && result.data) {
+        setCallId(result.data.callId);
+        setCallStatus('calling');
+        showSnackbar('Call initiated. Waiting for connection...');
+      } else {
+        setCallStatus('failed');
+        const errorMsg = result.message || 'Failed to initiate call';
+        showSnackbar(`Call failed: ${errorMsg}. You can abandon this interview.`);
+      }
+    } catch (error: any) {
+      console.error('Error making call:', error);
+      setCallStatus('failed');
+      const errorMsg = error.response?.data?.message || error.message || 'Failed to make call';
+      showSnackbar(`Call failed: ${errorMsg}. You can abandon this interview.`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const abandonInterview = async () => {
     try {
-      if (sessionId) {
+      if (isCatiMode && catiQueueId) {
+        // CATI mode - use CATI abandon endpoint
+        // Map React Native reason values to backend expected values
+        const reasonMap: Record<string, string> = {
+          'not_available': 'no_answer',
+          'refused': 'rejected',
+          'wrong_number': 'does_not_exist',
+          'call_later': 'call_later',
+          'other': 'other'
+        };
+        
+        const mappedReason = abandonReason ? (reasonMap[abandonReason] || 'other') : undefined;
+        
+        // Only send non-empty values
+        const reasonToSend = mappedReason && mappedReason.trim() ? mappedReason : undefined;
+        const notesToSend = abandonNotes && abandonNotes.trim() ? abandonNotes : undefined;
+        const dateToSend = (abandonReason === 'call_later' && callLaterDate && callLaterDate.trim()) ? callLaterDate : undefined;
+        
+        const result = await apiService.abandonCatiInterview(
+          catiQueueId,
+          reasonToSend,
+          notesToSend,
+          dateToSend
+        );
+        
+        if (result.success) {
+          showSnackbar('Interview abandoned');
+          navigation.navigate('Dashboard');
+        } else {
+          const errorMsg = result.message || 'Failed to abandon interview';
+          showSnackbar(errorMsg);
+        }
+      } else if (sessionId) {
+        // CAPI mode - use standard abandon endpoint
         await apiService.abandonInterview(sessionId);
+        showSnackbar('Interview abandoned');
+        navigation.navigate('Dashboard');
+      } else {
+        showSnackbar('No active interview to abandon');
+        navigation.navigate('Dashboard');
       }
-      showSnackbar('Interview abandoned');
-      navigation.navigate('Dashboard');
-    } catch (error) {
-      console.error('Error abandoning interview:', error);
-      showSnackbar('Failed to abandon interview');
+    } catch (err: any) {
+      console.error('Error abandoning interview:', err);
+      const errorMsg = err.response?.data?.message || err.message || 'Failed to abandon interview';
+      showSnackbar(errorMsg);
     }
   };
 
@@ -1197,51 +1415,55 @@ export default function InterviewInterface({ navigation, route }: any) {
       setIsLoading(true);
       
       // Stop audio recording and get audio URI
+      // Stop audio recording and upload if available (only for CAPI mode)
       let audioUrl = null;
-      let currentAudioUri = audioUri;
-      
-      console.log('Current audioUri state:', audioUri);
-      console.log('Is recording:', isRecording);
-      
-      if (isRecording) {
-        // Stop recording and get the real audio file
-        console.log('Stopping audio recording...');
-        currentAudioUri = await stopAudioRecording();
-        console.log('Audio file path from stopRecording:', currentAudioUri);
-      }
-      
-      console.log('Final currentAudioUri:', currentAudioUri);
-      
-      // Upload audio file if available
       let audioFileSize = 0;
-      if (currentAudioUri) {
-        console.log('Uploading audio file...', currentAudioUri);
+      
+      if (!isCatiMode) {
+        // Only process audio for CAPI mode
+        let currentAudioUri = audioUri;
+        console.log('Current audioUri state:', audioUri);
+        console.log('Is recording:', isRecording);
         
-        try {
-          // Check if file exists before uploading
-          const fileInfo = await FileSystem.getInfoAsync(currentAudioUri);
-          if (!fileInfo.exists) {
-            console.error('Audio file does not exist at path:', currentAudioUri);
-            showSnackbar('Audio file not found, continuing without audio');
-          } else {
-            console.log('Audio file exists, size:', fileInfo.size);
-            const uploadResult = await apiService.uploadAudioFile(currentAudioUri, sessionId, survey._id);
-            if (uploadResult.success) {
-              audioUrl = uploadResult.response.audioUrl;
-              audioFileSize = uploadResult.response.size || 0;
-              console.log('Audio uploaded successfully:', audioUrl, 'Size:', audioFileSize);
-              showSnackbar('Audio recording uploaded successfully');
-            } else {
-              console.error('Failed to upload audio:', uploadResult.message);
-              showSnackbar('Failed to upload audio, continuing without audio');
-            }
-          }
-        } catch (uploadError: any) {
-          console.error('Error during audio upload:', uploadError);
-          showSnackbar('Failed to upload audio, continuing without audio');
+        if (isRecording) {
+          // Stop recording and get the real audio file
+          console.log('Stopping audio recording...');
+          currentAudioUri = await stopAudioRecording();
+          console.log('Audio file path from stopRecording:', currentAudioUri);
         }
-      } else {
-        console.log('No audio file to upload');
+        
+        console.log('Final currentAudioUri:', currentAudioUri);
+        
+        // Upload audio file if available
+        if (currentAudioUri) {
+          console.log('Uploading audio file...', currentAudioUri);
+          
+          try {
+            // Check if file exists before uploading
+            const fileInfo = await FileSystem.getInfoAsync(currentAudioUri);
+            if (!fileInfo.exists) {
+              console.error('Audio file does not exist at path:', currentAudioUri);
+              showSnackbar('Audio file not found, continuing without audio');
+            } else {
+              console.log('Audio file exists, size:', fileInfo.size);
+              const uploadResult = await apiService.uploadAudioFile(currentAudioUri, sessionId, survey._id);
+              if (uploadResult.success) {
+                audioUrl = uploadResult.response.audioUrl;
+                audioFileSize = uploadResult.response.size || 0;
+                console.log('Audio uploaded successfully:', audioUrl, 'Size:', audioFileSize);
+                showSnackbar('Audio recording uploaded successfully');
+              } else {
+                console.error('Failed to upload audio:', uploadResult.message);
+                showSnackbar('Failed to upload audio, continuing without audio');
+              }
+            }
+          } catch (uploadError: any) {
+            console.error('Error during audio upload:', uploadError);
+            showSnackbar('Failed to upload audio, continuing without audio');
+          }
+        } else {
+          console.log('No audio file to upload');
+        }
       }
       
       // Prepare final response data for ALL questions (including skipped ones)
@@ -1405,43 +1627,18 @@ export default function InterviewInterface({ navigation, route }: any) {
         };
       });
 
-      const result = await apiService.completeInterview(sessionId, {
-        responses: finalResponses,
-        qualityMetrics: {
-          averageResponseTime: 1,
-          backNavigationCount: 0,
-          dataQualityScore: 100,
-          totalPauseTime: 0,
-          totalPauses: 0
-        },
-        metadata: {
-          survey: survey._id,
-          interviewer: sessionData?.interviewer || 'current-user',
-          status: 'Pending_Approval',
+      let result;
+      
+      if (isCatiMode && catiQueueId) {
+        // CATI mode - use CATI complete endpoint
+        // Backend expects flat structure, not nested in metadata
+        const answeredCount = finalResponses.filter((r: any) => hasResponseContent(r.response)).length;
+        const totalCount = allQuestions.length;
+        
+        result = await apiService.completeCatiInterview(catiQueueId, {
           sessionId: sessionId,
-          startTime: sessionData?.startTime || new Date(),
-          endTime: new Date(),
-          totalTimeSpent: duration,
-          interviewMode: survey.mode === 'multi_mode' ? (survey.assignedMode || 'capi') : (survey.mode || 'capi'),
-          deviceInfo: {
-            userAgent: 'React Native App',
-            platform: 'Mobile',
-            browser: 'React Native',
-            screenResolution: `${width}x${height}`,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-          },
-            audioRecording: {
-              audioUrl: audioUrl,
-              hasAudio: !!audioUrl,
-              recordingDuration: Math.round(duration), // Use total interview duration
-              format: 'm4a',
-              codec: 'aac',
-              bitrate: 128000,
-              fileSize: audioFileSize, // Use actual file size from upload response
-              uploadedAt: audioUrl ? new Date().toISOString() : null
-            },
-          location: locationData,
-          selectedAC: selectedAC,
+          responses: finalResponses,
+          selectedAC: selectedAC || null,
           selectedPollingStation: selectedPollingStation.stationName ? {
             state: selectedPollingStation.state,
             acNo: selectedPollingStation.acNo,
@@ -1455,12 +1652,72 @@ export default function InterviewInterface({ navigation, route }: any) {
             latitude: selectedPollingStation.latitude,
             longitude: selectedPollingStation.longitude
           } : null,
-          totalQuestions: allQuestions.length,
-          answeredQuestions: finalResponses.filter((r: any) => hasResponseContent(r.response)).length,
-          skippedQuestions: finalResponses.filter((r: any) => !hasResponseContent(r.response)).length,
-          completionPercentage: Math.round((finalResponses.filter((r: any) => hasResponseContent(r.response)).length / allQuestions.length) * 100)
-        }
-      });
+          totalTimeSpent: duration,
+          startTime: sessionData?.startTime || startTime || new Date(),
+          endTime: new Date(),
+          totalQuestions: totalCount,
+          answeredQuestions: answeredCount,
+          completionPercentage: totalCount > 0 ? Math.round((answeredCount / totalCount) * 100) : 0
+        });
+      } else {
+        // CAPI mode - use standard complete endpoint
+        result = await apiService.completeInterview(sessionId, {
+          responses: finalResponses,
+          qualityMetrics: {
+            averageResponseTime: 1,
+            backNavigationCount: 0,
+            dataQualityScore: 100,
+            totalPauseTime: 0,
+            totalPauses: 0
+          },
+          metadata: {
+            survey: survey._id,
+            interviewer: sessionData?.interviewer || 'current-user',
+            status: 'Pending_Approval',
+            sessionId: sessionId,
+            startTime: sessionData?.startTime || new Date(),
+            endTime: new Date(),
+            totalTimeSpent: duration,
+            interviewMode: survey.mode === 'multi_mode' ? (survey.assignedMode || 'capi') : (survey.mode || 'capi'),
+            deviceInfo: {
+              userAgent: 'React Native App',
+              platform: 'Mobile',
+              browser: 'React Native',
+              screenResolution: `${width}x${height}`,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            },
+            audioRecording: {
+              audioUrl: audioUrl,
+              hasAudio: !!audioUrl,
+              recordingDuration: Math.round(duration), // Use total interview duration
+              format: 'm4a',
+              codec: 'aac',
+              bitrate: 128000,
+              fileSize: audioFileSize, // Use actual file size from upload response
+              uploadedAt: audioUrl ? new Date().toISOString() : null
+            },
+            location: locationData,
+            selectedAC: selectedAC,
+            selectedPollingStation: selectedPollingStation.stationName ? {
+              state: selectedPollingStation.state,
+              acNo: selectedPollingStation.acNo,
+              acName: selectedPollingStation.acName,
+              pcNo: selectedPollingStation.pcNo,
+              pcName: selectedPollingStation.pcName,
+              district: selectedPollingStation.district,
+              groupName: selectedPollingStation.groupName,
+              stationName: selectedPollingStation.stationName,
+              gpsLocation: selectedPollingStation.gpsLocation,
+              latitude: selectedPollingStation.latitude,
+              longitude: selectedPollingStation.longitude
+            } : null,
+            totalQuestions: allQuestions.length,
+            answeredQuestions: finalResponses.filter((r: any) => hasResponseContent(r.response)).length,
+            skippedQuestions: finalResponses.filter((r: any) => !hasResponseContent(r.response)).length,
+            completionPercentage: Math.round((finalResponses.filter((r: any) => hasResponseContent(r.response)).length / allQuestions.length) * 100)
+          }
+        });
+      }
 
       if (result.success) {
         Alert.alert(
@@ -2365,33 +2622,69 @@ export default function InterviewInterface({ navigation, route }: any) {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          {/* Recording Indicator and Abandon button */}
+          {/* Recording Indicator / Call Status and Abandon button */}
           <View style={styles.headerActions}>
-            {/* Recording Indicator - Just the red dot */}
-          {((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && (
+            {/* CATI Call Status */}
+            {isCatiMode && (
+              <View style={styles.callStatusContainer}>
+            {callStatus === 'calling' && (
+              <View style={styles.callStatusIndicator}>
+                <ActivityIndicator size="small" color="#2563eb" />
+                <Text style={styles.callStatusText}>Calling...</Text>
+              </View>
+            )}
+            {callStatus === 'connected' && (
+              <View style={styles.callStatusIndicator}>
+                <View style={[styles.callStatusDot, { backgroundColor: '#059669' }]} />
+                <Text style={styles.callStatusText}>Call Started</Text>
+              </View>
+            )}
+                {callStatus === 'failed' && (
+                  <View style={styles.callStatusIndicator}>
+                    <View style={[styles.callStatusDot, { backgroundColor: '#ef4444' }]} />
+                    <Text style={styles.callStatusText}>Call Failed</Text>
+                  </View>
+                )}
+                {catiRespondent && (
+                  <Text style={styles.respondentInfo}>
+                    {catiRespondent.name} - {catiRespondent.phone}
+                  </Text>
+                )}
+              </View>
+            )}
+            
+            {/* Recording Indicator - Just the red dot (CAPI only) */}
+            {!isCatiMode && ((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && (
               <View style={styles.recordingDotIndicator}>
-              <View style={[
+                <View style={[
                   styles.recordingDot,
-                {
-                  backgroundColor: audioPermission === false 
-                    ? '#ef4444'
-                    : isRecording 
-                      ? (isAudioPaused ? '#fbbf24' : '#ef4444') 
-                      : '#6b7280'
-                }
-              ]} />
-            </View>
-          )}
+                  {
+                    backgroundColor: audioPermission === false 
+                      ? '#ef4444'
+                      : isRecording 
+                        ? (isAudioPaused ? '#fbbf24' : '#ef4444') 
+                        : '#6b7280'
+                  }
+                ]} />
+              </View>
+            )}
+            
             <Button
               mode="contained"
-              onPress={() => setShowAbandonConfirm(true)}
+              onPress={() => {
+                if (isCatiMode) {
+                  setShowAbandonModal(true);
+                } else {
+                  setShowAbandonConfirm(true);
+                }
+              }}
               icon="stop"
               style={styles.actionButton}
               buttonColor="#ef4444"
             >
               Abandon
             </Button>
-                  </View>
+          </View>
         </View>
         
         <View style={styles.headerInfo}>
@@ -2524,7 +2817,7 @@ export default function InterviewInterface({ navigation, route }: any) {
         )}
       </View>
 
-      {/* Abandon/Exit Confirmation Modal */}
+      {/* Abandon/Exit Confirmation Modal (CAPI) */}
       {showAbandonConfirm && (
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -2552,6 +2845,95 @@ export default function InterviewInterface({ navigation, route }: any) {
               </Button>
             </View>
           </View>
+        </View>
+      )}
+
+      {/* CATI Abandon Modal */}
+      {showAbandonModal && (
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
+            <Text style={styles.modalTitle}>Abandon CATI Interview</Text>
+            <Text style={styles.modalText}>
+              {callStatus === 'failed' 
+                ? 'The call failed. You can abandon this interview or provide a reason below.'
+                : 'Please provide a reason for abandoning this interview.'}
+            </Text>
+            
+            {callStatus !== 'failed' && (
+              <>
+                <Text style={styles.modalLabel}>Reason (Required)</Text>
+                <View style={styles.radioGroup}>
+                  <RadioButton.Group
+                    onValueChange={setAbandonReason}
+                    value={abandonReason}
+                  >
+                    <RadioButton.Item label="Respondent Not Available" value="not_available" />
+                    <RadioButton.Item label="Respondent Refused" value="refused" />
+                    <RadioButton.Item label="Wrong Number" value="wrong_number" />
+                    <RadioButton.Item label="Call Later" value="call_later" />
+                    <RadioButton.Item label="Other" value="other" />
+                  </RadioButton.Group>
+                </View>
+                
+                {abandonReason === 'call_later' && (
+                  <View style={styles.datePickerContainer}>
+                    <Text style={styles.modalLabel}>Call Later Date</Text>
+                    <TextInput
+                      mode="outlined"
+                      placeholder="YYYY-MM-DD"
+                      value={callLaterDate}
+                      onChangeText={setCallLaterDate}
+                      style={styles.dateInput}
+                    />
+                  </View>
+                )}
+              </>
+            )}
+            
+            <Text style={styles.modalLabel}>Notes (Optional)</Text>
+            <TextInput
+              mode="outlined"
+              multiline
+              numberOfLines={3}
+              placeholder="Add any additional notes..."
+              value={abandonNotes}
+              onChangeText={setAbandonNotes}
+              style={styles.notesInput}
+            />
+            
+            <View style={styles.modalButtons}>
+              <Button
+                mode="outlined"
+                onPress={() => {
+                  setShowAbandonModal(false);
+                  setAbandonReason('');
+                  setAbandonNotes('');
+                  setCallLaterDate('');
+                }}
+                style={styles.modalButton}
+              >
+                Cancel
+              </Button>
+              <Button
+                mode="contained"
+                onPress={() => {
+                  if (callStatus !== 'failed' && !abandonReason) {
+                    showSnackbar('Please select a reason for abandoning');
+                    return;
+                  }
+                  if (abandonReason === 'call_later' && !callLaterDate) {
+                    showSnackbar('Please select a date for calling later');
+                    return;
+                  }
+                  setShowAbandonModal(false);
+                  abandonInterview();
+                }}
+                style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
+              >
+                Abandon
+              </Button>
+            </View>
+          </ScrollView>
         </View>
       )}
 
@@ -2913,6 +3295,55 @@ const styles = StyleSheet.create({
   audioStatusText: {
     fontSize: 14,
     color: '#6b7280',
+  },
+  callStatusContainer: {
+    marginRight: 8,
+    alignItems: 'flex-end',
+  },
+  callStatusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  callStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 6,
+  },
+  callStatusText: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  respondentInfo: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginTop: 2,
+  },
+  modalContentContainer: {
+    paddingBottom: 20,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  radioGroup: {
+    marginBottom: 8,
+  },
+  datePickerContainer: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  dateInput: {
+    marginTop: 8,
+  },
+  notesInput: {
+    marginTop: 8,
+    minHeight: 80,
   },
   navigation: {
     flexDirection: 'row',

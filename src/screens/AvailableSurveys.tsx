@@ -110,22 +110,29 @@ export default function AvailableSurveys({ navigation }: any) {
   };
 
   const handleStartInterview = (survey: Survey) => {
-    // Check if this is a multi-mode survey with CAPI assignment
-    if (survey.mode === 'multi_mode' && survey.assignedMode === 'capi') {
-      // Directly navigate to interview interface for CAPI interviews
-      navigation.navigate('InterviewInterface', { survey });
-    } else if (survey.mode === 'multi_mode' && survey.assignedMode === 'cati') {
+    // Check if this is a CATI interview (multi_mode with cati assignment or direct cati mode)
+    const isCatiMode = survey.mode === 'cati' || (survey.mode === 'multi_mode' && survey.assignedMode === 'cati');
+    
+    if (isCatiMode) {
+      // CATI interview - navigate directly
       Alert.alert(
-        'CATI Interview',
-        `This is a CATI (Computer-Assisted Telephonic Interviewing) interview for "${survey.surveyName}". This feature is coming soon!`,
+        'Start CATI Interview',
+        `You are about to start a CATI (Computer-Assisted Telephonic Interviewing) interview for "${survey.surveyName}". A call will be made to the respondent.`,
         [
           {
-            text: 'OK',
+            text: 'Cancel',
             style: 'cancel',
+          },
+          {
+            text: 'Start',
+            onPress: () => {
+              navigation.navigate('InterviewInterface', { survey, isCatiMode: true });
+            },
           },
         ]
       );
     } else {
+      // CAPI or other mode
       Alert.alert(
         'Start Interview',
         `Are you sure you want to start the interview for "${survey.surveyName}"?`,
@@ -137,7 +144,7 @@ export default function AvailableSurveys({ navigation }: any) {
           {
             text: 'Start',
             onPress: () => {
-              navigation.navigate('InterviewInterface', { survey });
+              navigation.navigate('InterviewInterface', { survey, isCatiMode: false });
             },
           },
         ]
@@ -471,29 +478,19 @@ export default function AvailableSurveys({ navigation }: any) {
                     View Details
                   </Button>
                   
-                  {survey.mode === 'multi_mode' && survey.assignedMode === 'cati' ? (
-                    <Button
-                      mode="outlined"
-                      onPress={() => handleStartInterview(survey)}
-                      style={[styles.startButton, { borderColor: '#2563eb' }]}
-                      compact
-                      disabled
-                    >
-                      CATI Coming Soon
-                    </Button>
-                  ) : (
-                    <Button
-                      mode="contained"
-                      onPress={() => handleStartInterview(survey)}
-                      style={styles.startButton}
-                      compact
-                    >
-                      {survey.mode === 'multi_mode' && survey.assignedMode === 'capi' 
-                        ? 'Start CAPI Interview' 
-                        : 'Start Interview'
-                      }
-                    </Button>
-                  )}
+                  <Button
+                    mode="contained"
+                    onPress={() => handleStartInterview(survey)}
+                    style={styles.startButton}
+                    compact
+                  >
+                    {survey.mode === 'multi_mode' && survey.assignedMode === 'cati' 
+                      ? 'Start CATI Interview'
+                      : survey.mode === 'multi_mode' && survey.assignedMode === 'capi' 
+                      ? 'Start CAPI Interview' 
+                      : 'Start Interview'
+                    }
+                  </Button>
                 </View>
               </Card.Content>
             </Card>

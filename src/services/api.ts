@@ -555,6 +555,124 @@ class ApiService {
     }
   }
 
+  // CATI Interview API methods
+  async startCatiInterview(surveyId: string) {
+    try {
+      const headers = await this.getHeaders();
+      console.log('📞 Starting CATI interview for survey:', surveyId);
+      const response = await axios.post(
+        `${this.baseURL}/api/cati-interview/start/${surveyId}`,
+        {},
+        { headers }
+      );
+      
+      console.log('📞 CATI start response:', JSON.stringify(response.data, null, 2));
+      
+      // Check the backend's success field, not just HTTP status
+      if (response.data.success === false) {
+        console.log('❌ Backend returned success: false');
+        return {
+          success: false,
+          message: response.data.message || 'Failed to start CATI interview',
+          data: response.data.data || null
+        };
+      }
+      
+      console.log('✅ Backend returned success: true');
+      console.log('✅ Response data:', JSON.stringify(response.data.data, null, 2));
+      
+      return {
+        success: true,
+        data: response.data.data
+      };
+    } catch (error: any) {
+      console.error('❌ Start CATI interview error:', error);
+      console.error('❌ Error response:', error.response?.data);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to start CATI interview',
+        error: error.response?.data,
+        data: error.response?.data?.data || null
+      };
+    }
+  }
+
+  async makeCallToRespondent(queueId: string) {
+    try {
+      const headers = await this.getHeaders();
+      const response = await axios.post(
+        `${this.baseURL}/api/cati-interview/make-call/${queueId}`,
+        {},
+        { headers }
+      );
+      return {
+        success: true,
+        data: response.data.data
+      };
+    } catch (error: any) {
+      console.error('Make call error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to make call',
+        error: error.response?.data
+      };
+    }
+  }
+
+  async abandonCatiInterview(queueId: string, reason?: string, notes?: string, callLaterDate?: string) {
+    try {
+      const headers = await this.getHeaders();
+      const response = await axios.post(
+        `${this.baseURL}/api/cati-interview/abandon/${queueId}`,
+        {
+          reason,
+          notes,
+          callLaterDate
+        },
+        { headers }
+      );
+      return {
+        success: true,
+        data: response.data.data
+      };
+    } catch (error: any) {
+      console.error('Abandon CATI interview error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to abandon interview',
+        error: error.response?.data
+      };
+    }
+  }
+
+  async completeCatiInterview(queueId: string, interviewData: any) {
+    try {
+      const headers = await this.getHeaders();
+      console.log('📤 Completing CATI interview with queueId:', queueId);
+      console.log('📤 Interview data:', JSON.stringify(interviewData, null, 2));
+      const response = await axios.post(
+        `${this.baseURL}/api/cati-interview/complete/${queueId}`,
+        interviewData,
+        { headers }
+      );
+      console.log('✅ Complete CATI interview response:', JSON.stringify(response.data, null, 2));
+      return {
+        success: true,
+        data: response.data.data
+      };
+    } catch (error: any) {
+      console.error('❌ Complete CATI interview error:', error);
+      console.error('❌ Error response:', error.response?.data);
+      console.error('❌ Error status:', error.response?.status);
+      console.error('❌ Error URL:', `${this.baseURL}/api/cati-interview/complete/${queueId}`);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to complete interview',
+        error: error.response?.data
+      };
+    }
+  }
+
   async getPollingStationGPS(state: string, acIdentifier: string, groupName: string, stationName: string) {
     try {
       const headers = await this.getHeaders();
