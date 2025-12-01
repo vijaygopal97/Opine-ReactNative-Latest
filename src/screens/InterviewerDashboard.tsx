@@ -98,12 +98,6 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
     }
   };
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 18) return 'Good Afternoon';
-    return 'Good Evening';
-  };
 
   const getStatusColor = (status: string) => {
     if (!status) return '#6b7280';
@@ -175,7 +169,6 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
               style={styles.avatar}
             />
             <View style={styles.userDetails}>
-              <Text style={styles.greeting}>{getGreeting()}</Text>
               <Text style={styles.userName}>{user.firstName} {user.lastName}</Text>
               <Text style={styles.userRole}>Interviewer</Text>
             </View>

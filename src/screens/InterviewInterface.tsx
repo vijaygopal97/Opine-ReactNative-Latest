@@ -25,6 +25,7 @@ import {
   Chip,
   Menu,
   Divider,
+  Switch,
 } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,6 +52,18 @@ export default function InterviewInterface({ navigation, route }: any) {
     ? routeIsCatiMode 
     : survey.mode === 'cati' || survey.assignedMode === 'cati';
   
+  // Helper function to get display text based on translation toggle
+  const getDisplayText = (text: string | null | undefined): string => {
+    if (!text) return '';
+    const parsed = parseTranslation(text);
+    // If toggle is ON and translation exists, show only translation
+    if (showTranslationOnly && parsed.translation) {
+      return parsed.translation;
+    }
+    // Otherwise show main text
+    return parsed.mainText;
+  };
+
   // Helper function to check if an option is "Other", "Others", or "Others (Specify)"
   const isOthersOption = (optText: string | null | undefined): boolean => {
     if (!optText) return false;
@@ -73,6 +86,7 @@ export default function InterviewInterface({ navigation, route }: any) {
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [response, setResponse] = useState<SurveyResponse | null>(null);
+  const [showTranslationOnly, setShowTranslationOnly] = useState(false);
   
   // Interview session state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -2302,15 +2316,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                       }
                     }}
                   />
-                  <Text style={styles.optionText}>{getMainText(optionText)}</Text>
-                  {(() => {
-                    const parsed = parseTranslation(optionText);
-                    return parsed.translation ? (
-                      <Text style={[styles.optionText, { fontSize: 14, fontStyle: 'italic', color: '#666' }]}>
-                        {parsed.translation}
-                      </Text>
-                    ) : null;
-                  })()}
+                  <Text style={styles.optionText}>{getDisplayText(optionText)}</Text>
                 </View>
               );
             })}
@@ -2367,15 +2373,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                     onPress={() => handleResponseChange(question.id, option.value)}
                   />
                   <View style={styles.optionContent}>
-                    <Text style={styles.optionText}>{getMainText(option.text)}</Text>
-                    {(() => {
-                      const parsed = parseTranslation(option.text);
-                      return parsed.translation ? (
-                        <Text style={[styles.optionText, { fontSize: 14, fontStyle: 'italic', color: '#666' }]}>
-                          {parsed.translation}
-                        </Text>
-                      ) : null;
-                    })()}
+                    <Text style={styles.optionText}>{getDisplayText(option.text)}</Text>
                     {quotaInfo && (
                       <View style={styles.quotaInfo}>
                         <Text style={styles.quotaText}>
@@ -2410,9 +2408,8 @@ export default function InterviewInterface({ navigation, route }: any) {
                   'Select Option',
                   'Choose an option:',
                   shuffledDropdownOptions.map((option: any) => {
-                    const parsed = parseTranslation(option.text);
                     return {
-                      text: parsed.translation ? `${parsed.mainText} / ${parsed.translation}` : parsed.mainText,
+                      text: getDisplayText(option.text),
                       onPress: () => handleResponseChange(question.id, option.value)
                     };
                   })
@@ -2456,17 +2453,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                       {rating}
                     </Button>
                     {label ? (
-                      <View>
-                        <Text style={styles.ratingLabel}>{getMainText(label)}</Text>
-                        {(() => {
-                          const parsed = parseTranslation(label);
-                          return parsed.translation ? (
-                            <Text style={[styles.ratingLabel, { fontSize: 10, fontStyle: 'italic', color: '#888' }]}>
-                              {parsed.translation}
-                            </Text>
-                          ) : null;
-                        })()}
-                      </View>
+                      <Text style={styles.ratingLabel}>{getDisplayText(label)}</Text>
                     ) : null}
                   </View>
                 );
@@ -2475,26 +2462,10 @@ export default function InterviewInterface({ navigation, route }: any) {
             {(minLabel || maxLabel) && (
               <View style={styles.ratingLabelsRow}>
                 <View>
-                  <Text style={styles.ratingScaleLabel}>{getMainText(minLabel)}</Text>
-                    {(() => {
-                      const parsed = parseTranslation(minLabel);
-                      return parsed.translation ? (
-                        <Text style={[styles.ratingScaleLabel, { fontSize: 10, fontStyle: 'italic', color: '#888' }]}>
-                          {parsed.translation}
-                        </Text>
-                      ) : null;
-                    })()}
+                  <Text style={styles.ratingScaleLabel}>{getDisplayText(minLabel)}</Text>
                 </View>
                 <View>
-                  <Text style={styles.ratingScaleLabel}>{getMainText(maxLabel)}</Text>
-                    {(() => {
-                      const parsed = parseTranslation(maxLabel);
-                      return parsed.translation ? (
-                        <Text style={[styles.ratingScaleLabel, { fontSize: 10, fontStyle: 'italic', color: '#888' }]}>
-                          {parsed.translation}
-                        </Text>
-                      ) : null;
-                    })()}
+                  <Text style={styles.ratingScaleLabel}>{getDisplayText(maxLabel)}</Text>
                 </View>
               </View>
             )}
@@ -2847,17 +2818,18 @@ export default function InterviewInterface({ navigation, route }: any) {
               </View>
             )}
             
+            {/* Translation Toggle */}
+            <View style={styles.translationToggleContainer}>
+              <Text style={styles.translationToggleLabel}>Show Translation Only</Text>
+              <Switch
+                value={showTranslationOnly}
+                onValueChange={setShowTranslationOnly}
+              />
+            </View>
+
             <View style={styles.questionHeader}>
               <Text style={styles.questionText}>
-                {getMainText(currentQuestion.text)}
-                {(() => {
-                  const parsed = parseTranslation(currentQuestion.text);
-                  return parsed.translation ? (
-                    <Text style={{ fontSize: 18, fontStyle: 'italic', color: '#666', marginTop: 4 }}>
-                      {parsed.translation}
-                    </Text>
-                  ) : null;
-                })()}
+                {getDisplayText(currentQuestion.text)}
                 {currentQuestion.required && <Text style={styles.requiredAsterisk}> *</Text>}
               </Text>
             </View>
@@ -3202,6 +3174,22 @@ const styles = StyleSheet.create({
   disabledContent: {
     opacity: 0.5,
     pointerEvents: 'none',
+  },
+  translationToggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    marginBottom: 16,
+    backgroundColor: '#f0f9ff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+  },
+  translationToggleLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1e40af',
   },
   questionHeader: {
     marginBottom: 2,
