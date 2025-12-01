@@ -45,9 +45,9 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
       const result = await apiService.login(email.trim(), password);
       
       if (result.success && result.user && result.token) {
-        // Check if user is an interviewer
-        if (result.user.userType !== 'interviewer') {
-          showSnackbar('Access denied. This app is only for interviewers.');
+        // Check if user is an interviewer or quality agent
+        if (result.user.userType !== 'interviewer' && result.user.userType !== 'quality_agent') {
+          showSnackbar('Access denied. This app is only for interviewers and quality agents.');
           return;
         }
         
@@ -93,7 +93,7 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
                 </View>
               </View>
               <Text style={styles.title}>Welcome Back</Text>
-              <Text style={styles.subtitle}>Sign in to continue as an interviewer</Text>
+              <Text style={styles.subtitle}>Sign in to continue</Text>
             </View>
 
             {/* Login Form */}
