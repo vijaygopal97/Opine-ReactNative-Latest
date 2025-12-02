@@ -8,6 +8,8 @@ import {
   Alert,
   TouchableOpacity,
   PanResponder,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +24,7 @@ import {
   Snackbar,
 } from 'react-native-paper';
 import { apiService } from '../services/api';
+import { findGenderResponse, normalizeGenderResponse } from '../utils/genderUtils';
 
 const { width, height } = Dimensions.get('window');
 
@@ -64,6 +67,7 @@ export default function ResponseDetailsModal({
   const [loadingCatiRecording, setLoadingCatiRecording] = useState(false);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [responsesSectionExpanded, setResponsesSectionExpanded] = useState(false);
 
   useEffect(() => {
     if (visible && interview) {
@@ -74,7 +78,10 @@ export default function ResponseDetailsModal({
                       interview.audioRecording?.audioUrl;
       
       if (interview.interviewMode === 'capi' && audioUrl) {
-        loadAudio(audioUrl);
+        loadAudio(audioUrl).catch((error) => {
+          // Silently handle error - audio will show "No Recording Found"
+          console.error('Audio loading failed:', error);
+        });
       }
       
       // Fetch CATI call details if CATI interview
@@ -103,8 +110,9 @@ export default function ResponseDetailsModal({
       const result = await apiService.getCatiCallById(callId);
       if (result.success && result.data) {
         setCatiCallDetails(result.data);
-        // Fetch recording if available
-        if (result.data.recordingUrl || result.data._id) {
+        // Only fetch recording if recordingUrl is explicitly available
+        // Don't fetch just based on _id to avoid unnecessary 404 errors
+        if (result.data.recordingUrl) {
           await fetchCatiRecording(result.data._id || callId);
         }
       }
@@ -123,7 +131,13 @@ export default function ResponseDetailsModal({
         // For now, we'll handle it differently - the API should return a direct URL
         showSnackbar('Recording available - playback will be implemented');
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Silently handle 404 errors (recording not available) - this is expected
+      if (error?.response?.status === 404 || error?.status === 404) {
+        // Recording not available - this is normal, don't log as error
+        return;
+      }
+      // Only log unexpected errors
       console.error('Error fetching CATI recording:', error);
     } finally {
       setLoadingCatiRecording(false);
@@ -172,7 +186,8 @@ export default function ResponseDetailsModal({
       });
     } catch (error) {
       console.error('Error loading audio:', error);
-      showSnackbar('Failed to load audio recording');
+      // Don't show error snackbar - just mark as no recording available
+      setAudioSound(null);
     }
   };
 
@@ -192,7 +207,7 @@ export default function ResponseDetailsModal({
           }
           return;
         }
-        showSnackbar('No audio recording available');
+        // Don't show snackbar - just return silently
         return;
       }
 
@@ -203,7 +218,7 @@ export default function ResponseDetailsModal({
       }
     } catch (error) {
       console.error('Error playing audio:', error);
-      showSnackbar('Failed to play audio. Please check your connection.');
+      // Don't show snackbar - just log the error
     }
   };
 
@@ -292,51 +307,106 @@ export default function ResponseDetailsModal({
     }));
   };
 
+  // Helper function to check if a verification question should be shown
+  const shouldShowVerificationQuestion = (questionType: string): boolean => {
+    if (!interview) return true;
+    
+    // Phone number question should not be shown for CATI responses
+    if (questionType === 'phoneNumber' && interview.interviewMode === 'cati') {
+      return false;
+    }
+    
+    // Get verification responses to check if related response is skipped
+    const verificationResponses = getVerificationResponses();
+    
+    // Check if related response is skipped
+    switch (questionType) {
+      case 'gender':
+        return !verificationResponses.genderResponse?.isSkipped;
+      case 'upcomingElection':
+        return !verificationResponses.upcomingElectionResponse?.isSkipped;
+      case 'assembly2021':
+        return !verificationResponses.assembly2021Response?.isSkipped;
+      case 'lokSabha2024':
+        return !verificationResponses.lokSabha2024Response?.isSkipped;
+      case 'name':
+        return !verificationResponses.nameResponse?.isSkipped;
+      case 'age':
+        return !verificationResponses.ageResponse?.isSkipped;
+      default:
+        return true;
+    }
+  };
+
   const isVerificationFormValid = () => {
-    return verificationForm.audioStatus !== '' &&
-           verificationForm.genderMatching !== '' &&
-           verificationForm.upcomingElectionsMatching !== '' &&
-           verificationForm.previousElectionsMatching !== '' &&
-           verificationForm.previousLoksabhaElectionsMatching !== '' &&
-           verificationForm.nameMatching !== '' &&
-           verificationForm.ageMatching !== '' &&
-           verificationForm.phoneNumberAsked !== '';
+    if (!interview) return false;
+    
+    // Audio status is always required
+    if (verificationForm.audioStatus === '') return false;
+    
+    // Check each question only if it should be shown
+    if (shouldShowVerificationQuestion('gender') && verificationForm.genderMatching === '') return false;
+    if (shouldShowVerificationQuestion('upcomingElection') && verificationForm.upcomingElectionsMatching === '') return false;
+    if (shouldShowVerificationQuestion('assembly2021') && verificationForm.previousElectionsMatching === '') return false;
+    if (shouldShowVerificationQuestion('lokSabha2024') && verificationForm.previousLoksabhaElectionsMatching === '') return false;
+    if (shouldShowVerificationQuestion('name') && verificationForm.nameMatching === '') return false;
+    if (shouldShowVerificationQuestion('age') && verificationForm.ageMatching === '') return false;
+    if (shouldShowVerificationQuestion('phoneNumber') && verificationForm.phoneNumberAsked === '') return false;
+    
+    return true;
   };
 
   const getApprovalStatus = () => {
+    if (!interview) return 'rejected';
+    
     const audioStatus = verificationForm.audioStatus;
     if (audioStatus !== '1' && audioStatus !== '4' && audioStatus !== '7') {
       return 'rejected';
     }
     
-    if (verificationForm.genderMatching !== '1') {
-      return 'rejected';
+    // Only check questions that should be shown
+    if (shouldShowVerificationQuestion('gender')) {
+      if (verificationForm.genderMatching !== '1') {
+        return 'rejected';
+      }
     }
     
-    if (verificationForm.upcomingElectionsMatching !== '1' && 
-        verificationForm.upcomingElectionsMatching !== '3') {
-      return 'rejected';
+    if (shouldShowVerificationQuestion('upcomingElection')) {
+      if (verificationForm.upcomingElectionsMatching !== '1' && 
+          verificationForm.upcomingElectionsMatching !== '3') {
+        return 'rejected';
+      }
     }
     
-    if (verificationForm.previousElectionsMatching !== '1' && 
-        verificationForm.previousElectionsMatching !== '3') {
-      return 'rejected';
+    if (shouldShowVerificationQuestion('assembly2021')) {
+      if (verificationForm.previousElectionsMatching !== '1' && 
+          verificationForm.previousElectionsMatching !== '3') {
+        return 'rejected';
+      }
     }
     
-    if (verificationForm.previousLoksabhaElectionsMatching !== '1' && 
-        verificationForm.previousLoksabhaElectionsMatching !== '3') {
-      return 'rejected';
+    if (shouldShowVerificationQuestion('lokSabha2024')) {
+      if (verificationForm.previousLoksabhaElectionsMatching !== '1' && 
+          verificationForm.previousLoksabhaElectionsMatching !== '3') {
+        return 'rejected';
+      }
     }
     
-    if (verificationForm.nameMatching !== '1' && 
-        verificationForm.nameMatching !== '3') {
-      return 'rejected';
+    if (shouldShowVerificationQuestion('name')) {
+      if (verificationForm.nameMatching !== '1' && 
+          verificationForm.nameMatching !== '3') {
+        return 'rejected';
+      }
     }
     
-    if (verificationForm.ageMatching !== '1' && 
-        verificationForm.ageMatching !== '3') {
-      return 'rejected';
+    if (shouldShowVerificationQuestion('age')) {
+      if (verificationForm.ageMatching !== '1' && 
+          verificationForm.ageMatching !== '3') {
+        return 'rejected';
+      }
     }
+    
+    // Phone number question is informational only and already excluded for CATI
     
     return 'approved';
   };
@@ -382,10 +452,13 @@ export default function ResponseDetailsModal({
       r.questionText?.toLowerCase().includes('name') || 
       r.questionText?.toLowerCase().includes('respondent')
     );
-    const genderResponse = responses.find((r: any) => 
+    const genderResponse = findGenderResponse(responses, interview.survey || interview.survey?.survey) || responses.find((r: any) => 
       r.questionText?.toLowerCase().includes('gender') || 
       r.questionText?.toLowerCase().includes('sex')
     );
+    // Normalize gender response to handle translations
+    const genderValue = genderResponse?.response ? normalizeGenderResponse(genderResponse.response) : null;
+    const genderDisplay = genderValue === 'male' ? 'Male' : (genderValue === 'female' ? 'Female' : (genderResponse?.response || 'Not Available'));
     const ageResponse = responses.find((r: any) => 
       r.questionText?.toLowerCase().includes('age') || 
       r.questionText?.toLowerCase().includes('year')
@@ -602,24 +675,51 @@ export default function ResponseDetailsModal({
       ? (Array.isArray(assembly2021Response.response) ? assembly2021Response.response[0] : assembly2021Response.response)
       : null;
     
-    // 2024 Lok Sabha election response (Q7) - But user wants to show Q6 (2021 AE Party Choice) response
-    // Match by finding "2021 AE Party Choice" question in survey first
-    let lokSabha2024Response = findResponseBySurveyQuestion([
-      '2021', 'ae party choice', 'assembly elections', 'mla'
-    ], survey, false);
+    // 2024 Lok Sabha election response (Q6) - "2024 GE Party Choice"
+    // Match by finding "2024 GE Party Choice" question in survey first
+    // Use more specific keywords to avoid matching age or other questions
+    let lokSabha2024Response = null;
+    
+    // Strategy 1: Look for "ge party choice" with "2024" - require both
+    lokSabha2024Response = findResponseBySurveyQuestion([
+      'ge party choice', '2024'
+    ], survey, true, ['age', 'বয়স', 'year', 'old', 'assembly', 'ae', '2021', '2025']);
+    
+    // Strategy 2: Look for responses with "2024" and "ge party choice" separately
     if (!lokSabha2024Response) {
       lokSabha2024Response = findResponseByKeywords([
-        '2021', 'ae party choice', 'assembly elections', 'mla'
-      ], false);
+        '2024', 'ge party choice'
+      ], true, ['age', 'বয়স', 'year', 'old', 'assembly', 'ae', '2021', '2025', 'preference']);
+    }
+    
+    // Strategy 3: Look for "ge party choice" (case-insensitive) with "2024" anywhere
+    if (!lokSabha2024Response) {
+      lokSabha2024Response = responses.find((r: any) => {
+        const questionText = getMainText(r.questionText || '').toLowerCase();
+        const has2024 = questionText.includes('2024');
+        const hasGePartyChoice = questionText.includes('ge party choice') || questionText.includes('ge party');
+        const hasExclude = questionText.includes('age') || questionText.includes('বয়স') || 
+                          questionText.includes('assembly') || questionText.includes('ae') ||
+                          questionText.includes('2021') || questionText.includes('2025') ||
+                          questionText.includes('preference');
+        return has2024 && hasGePartyChoice && !hasExclude;
+      });
     }
     const lokSabha2024Value = lokSabha2024Response?.response 
       ? (Array.isArray(lokSabha2024Response.response) ? lokSabha2024Response.response[0] : lokSabha2024Response.response)
       : null;
     
-    // Name response
-    let nameResponse = findResponseBySurveyQuestion(['name', 'respondent'], survey, false);
+    // Name response - "Would You like to share your name with us?"
+    let nameResponse = findResponseBySurveyQuestion(['would you like to share your name', 'share your name', 'name with us'], survey, false);
     if (!nameResponse) {
-      nameResponse = findResponseByKeywords(['name', 'respondent'], false);
+      nameResponse = findResponseByKeywords(['would you like to share your name', 'share your name', 'name with us'], false);
+    }
+    // Fallback to general name search
+    if (!nameResponse) {
+      nameResponse = findResponseBySurveyQuestion(['name', 'respondent'], survey, false);
+      if (!nameResponse) {
+        nameResponse = findResponseByKeywords(['name', 'respondent'], false);
+      }
     }
     const nameValue = nameResponse?.response 
       ? (Array.isArray(nameResponse.response) ? nameResponse.response[0] : nameResponse.response)
@@ -689,7 +789,14 @@ export default function ResponseDetailsModal({
       assembly2021: assembly2021Value ? formatResponseDisplay(assembly2021Value, findQuestionByText(assembly2021Response?.questionText, survey)) : 'Not Available',
       lokSabha2024: lokSabha2024Value ? formatResponseDisplay(lokSabha2024Value, findQuestionByText(lokSabha2024Response?.questionText, survey)) : 'Not Available',
       name: nameValue ? formatResponseDisplay(nameValue, findQuestionByText(nameResponse?.questionText, survey)) : 'Not Available',
-      age: ageValue ? formatResponseDisplay(ageValue, findQuestionByText(ageResponse?.questionText, survey)) : 'Not Available'
+      age: ageValue ? formatResponseDisplay(ageValue, findQuestionByText(ageResponse?.questionText, survey)) : 'Not Available',
+      // Include response objects to check if skipped
+      genderResponse,
+      upcomingElectionResponse,
+      assembly2021Response,
+      lokSabha2024Response,
+      nameResponse,
+      ageResponse
     };
   };
 
@@ -699,6 +806,8 @@ export default function ResponseDetailsModal({
 
   if (!interview) return null;
 
+  const statusBarHeight = Platform.OS === 'ios' ? 0 : StatusBar.currentHeight || 0;
+
   return (
     <Modal
       visible={visible}
@@ -707,8 +816,10 @@ export default function ResponseDetailsModal({
       onRequestClose={onClose}
     >
       <View style={styles.modalContainer}>
+        <StatusBar barStyle="dark-content" />
+        
         {/* Header - Fixed at top */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: statusBarHeight + 12 }]}>
           <Text style={styles.headerTitle}>Response Details</Text>
           <Button
             mode="text"
@@ -722,6 +833,72 @@ export default function ResponseDetailsModal({
         </View>
 
         <Divider style={styles.divider} />
+
+        {/* Audio Recording (CAPI) - Sticky at top */}
+        {interview.interviewMode === 'capi' && (
+          <View style={styles.stickyAudioSection}>
+            <Card style={styles.audioCard}>
+              <Card.Content>
+                <Text style={styles.sectionTitle}>Audio Recording</Text>
+                
+                {audioSound ? (
+                  <View style={styles.audioControls}>
+                    <Button
+                      mode="contained"
+                      onPress={playAudio}
+                      icon={isPlaying ? "pause" : "play"}
+                      style={styles.audioButton}
+                      disabled={!audioSound}
+                    >
+                      {isPlaying ? 'Pause' : 'Play'}
+                    </Button>
+                    
+                    {audioDuration > 0 && (
+                      <View style={styles.audioTimelineContainer}>
+                        <Text style={styles.audioTime}>
+                          {formatTime(audioPosition)}
+                        </Text>
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          style={styles.sliderContainer}
+                          onLayout={(event) => {
+                            const { width } = event.nativeEvent.layout;
+                            setSliderWidth(width);
+                          }}
+                          onPress={handleSliderPress}
+                          {...panResponder.panHandlers}
+                        >
+                          <View 
+                            ref={sliderRef}
+                            style={styles.sliderTrack}
+                          >
+                            <View 
+                              style={[
+                                styles.sliderProgress,
+                                { width: `${audioDuration > 0 ? (audioPosition / audioDuration) * 100 : 0}%` }
+                              ]}
+                            />
+                            <View
+                              style={[
+                                styles.sliderThumb,
+                                { left: `${audioDuration > 0 ? (audioPosition / audioDuration) * 100 : 0}%` }
+                              ]}
+                            />
+                          </View>
+                        </TouchableOpacity>
+                        <Text style={styles.audioTime}>
+                          {formatTime(audioDuration)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.noDataText}>No Recording Found</Text>
+                )}
+              </Card.Content>
+            </Card>
+          </View>
+        )}
 
         {/* Scrollable Content */}
         <ScrollView 
@@ -798,72 +975,6 @@ export default function ResponseDetailsModal({
               </Card.Content>
             </Card>
 
-            {/* Audio Recording (CAPI) */}
-            {interview.interviewMode === 'capi' && (
-              <Card style={styles.card}>
-                <Card.Content>
-                  <Text style={styles.sectionTitle}>Audio Recording</Text>
-                  
-                  {(interview.metadata?.audioRecording?.audioUrl || 
-                    interview.audioUrl || 
-                    interview.audioRecording?.url ||
-                    interview.audioRecording?.audioUrl) ? (
-                    <View style={styles.audioControls}>
-                      <Button
-                        mode="contained"
-                        onPress={playAudio}
-                        icon={isPlaying ? "pause" : "play"}
-                        style={styles.audioButton}
-                      >
-                        {isPlaying ? 'Pause' : 'Play'}
-                      </Button>
-                      
-                      {audioDuration > 0 && (
-                        <View style={styles.audioTimelineContainer}>
-                          <Text style={styles.audioTime}>
-                            {formatTime(audioPosition)}
-                          </Text>
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            style={styles.sliderContainer}
-                            onLayout={(event) => {
-                              const { width } = event.nativeEvent.layout;
-                              setSliderWidth(width);
-                            }}
-                            onPress={handleSliderPress}
-                            {...panResponder.panHandlers}
-                          >
-                            <View 
-                              ref={sliderRef}
-                              style={styles.sliderTrack}
-                            >
-                              <View 
-                                style={[
-                                  styles.sliderProgress,
-                                  { width: `${audioDuration > 0 ? (audioPosition / audioDuration) * 100 : 0}%` }
-                                ]}
-                              />
-                              <View
-                                style={[
-                                  styles.sliderThumb,
-                                  { left: `${audioDuration > 0 ? (audioPosition / audioDuration) * 100 : 0}%` }
-                                ]}
-                              />
-                            </View>
-                          </TouchableOpacity>
-                          <Text style={styles.audioTime}>
-                            {formatTime(audioDuration)}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  ) : (
-                    <Text style={styles.noDataText}>No audio recording available</Text>
-                  )}
-                </Card.Content>
-              </Card>
-            )}
-
             {/* CATI Call Recording */}
             {interview.interviewMode === 'cati' && (
               <Card style={styles.card}>
@@ -895,34 +1006,48 @@ export default function ResponseDetailsModal({
               </Card>
             )}
 
-            {/* Responses */}
+            {/* Responses - Collapsible */}
             <Card style={styles.card}>
               <Card.Content>
-                <Text style={styles.sectionTitle}>Responses</Text>
+                <TouchableOpacity
+                  onPress={() => setResponsesSectionExpanded(!responsesSectionExpanded)}
+                  style={styles.collapsibleHeader}
+                >
+                  <Text style={styles.sectionTitle}>Responses</Text>
+                  <Ionicons
+                    name={responsesSectionExpanded ? "chevron-up" : "chevron-down"}
+                    size={24}
+                    color="#6b7280"
+                  />
+                </TouchableOpacity>
                 
-                {interview.responses && interview.responses.length > 0 ? (
-                  interview.responses
-                    .filter((r: any) => {
-                      // Filter out AC and polling station questions
-                      const questionText = r.questionText || '';
-                      return !questionText.toLowerCase().includes('select assembly constituency') &&
-                             !questionText.toLowerCase().includes('select polling station');
-                    })
-                    .map((response: any, index: number) => {
-                      const question = findQuestionByText(response.questionText, survey);
-                      return (
-                        <View key={index} style={styles.responseItem}>
-                          <Text style={styles.questionText}>
-                            Q{index + 1}: {response.questionText}
-                          </Text>
-                          <Text style={styles.responseText}>
-                            {formatResponseDisplay(response.response, question)}
-                          </Text>
-                        </View>
-                      );
-                    })
-                ) : (
-                  <Text style={styles.noDataText}>No responses available</Text>
+                {responsesSectionExpanded && (
+                  <View style={styles.responsesContent}>
+                    {interview.responses && interview.responses.length > 0 ? (
+                      interview.responses
+                        .filter((r: any) => {
+                          // Filter out AC and polling station questions
+                          const questionText = r.questionText || '';
+                          return !questionText.toLowerCase().includes('select assembly constituency') &&
+                                 !questionText.toLowerCase().includes('select polling station');
+                        })
+                        .map((response: any, index: number) => {
+                          const question = findQuestionByText(response.questionText, survey);
+                          return (
+                            <View key={index} style={styles.responseItem}>
+                              <Text style={styles.questionText}>
+                                Q{index + 1}: {response.questionText}
+                              </Text>
+                              <Text style={styles.responseText}>
+                                {formatResponseDisplay(response.response, question)}
+                              </Text>
+                            </View>
+                          );
+                        })
+                    ) : (
+                      <Text style={styles.noDataText}>No responses available</Text>
+                    )}
+                  </View>
                 )}
               </Card.Content>
             </Card>
@@ -999,184 +1124,196 @@ export default function ResponseDetailsModal({
                 </View>
 
                 {/* Upcoming Elections Matching */}
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>3. Is the Response Matching for the Upcoming Elections preference (Q9)? (উত্তরটি কি আসন্ন নির্বাচনের পছন্দ (প্রশ্ন ৯) এর সাথে মিলে যাচ্ছে?) *</Text>
-                  <Text style={styles.responseDisplayText}>Response: {verificationResponses.upcomingElection}</Text>
-                  <RadioButton.Group
-                    onValueChange={(value) => handleVerificationFormChange('upcomingElectionsMatching', value)}
-                    value={verificationForm.upcomingElectionsMatching}
-                  >
-                    <RadioButton.Item 
-                      label="1 - Matched (মিলে গেছে)" 
-                      value="1" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="2 - Not Matched (মেলেনি)" 
-                      value="2" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
-                      value="3" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
-                      value="4" 
-                      style={styles.radioItem}
-                    />
-                  </RadioButton.Group>
-                </View>
+                {shouldShowVerificationQuestion('upcomingElection') && (
+                  <View style={styles.formSection}>
+                    <Text style={styles.formLabel}>3. Is the Response Matching for the Upcoming Elections preference (Q8)? (উত্তরটি কি আসন্ন নির্বাচনের পছন্দ (প্রশ্ন ৮) এর সাথে মিলে যাচ্ছে?) *</Text>
+                    <Text style={styles.responseDisplayText}>Response: {verificationResponses.upcomingElection}</Text>
+                    <RadioButton.Group
+                      onValueChange={(value) => handleVerificationFormChange('upcomingElectionsMatching', value)}
+                      value={verificationForm.upcomingElectionsMatching}
+                    >
+                      <RadioButton.Item 
+                        label="1 - Matched (মিলে গেছে)" 
+                        value="1" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="2 - Not Matched (মেলেনি)" 
+                        value="2" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
+                        value="3" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
+                        value="4" 
+                        style={styles.radioItem}
+                      />
+                    </RadioButton.Group>
+                  </View>
+                )}
 
                 {/* Previous Elections Matching */}
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>4. Is the Response Matching for the Previous 2021 Assembly Election (Q6)? (উত্তরটি কি ২০২১ সালের পূর্ববর্তী বিধানসভা নির্বাচনের (প্রশ্ন ৬) সাথে মিলে যাচ্ছে?) *</Text>
-                  <Text style={styles.responseDisplayText}>Response: {verificationResponses.assembly2021}</Text>
-                  <RadioButton.Group
-                    onValueChange={(value) => handleVerificationFormChange('previousElectionsMatching', value)}
-                    value={verificationForm.previousElectionsMatching}
-                  >
-                    <RadioButton.Item 
-                      label="1 - Matched (মিলে গেছে)" 
-                      value="1" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="2 - Not Matched (মেলেনি)" 
-                      value="2" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
-                      value="3" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
-                      value="4" 
-                      style={styles.radioItem}
-                    />
-                  </RadioButton.Group>
-                </View>
+                {shouldShowVerificationQuestion('assembly2021') && (
+                  <View style={styles.formSection}>
+                    <Text style={styles.formLabel}>4. Is the Response Matching for the Previous 2021 Assembly Election (Q5)? (উত্তরটি কি ২০২১ সালের পূর্ববর্তী বিধানসভা নির্বাচনের (প্রশ্ন ৫) সাথে মিলে যাচ্ছে?) *</Text>
+                    <Text style={styles.responseDisplayText}>Response: {verificationResponses.assembly2021}</Text>
+                    <RadioButton.Group
+                      onValueChange={(value) => handleVerificationFormChange('previousElectionsMatching', value)}
+                      value={verificationForm.previousElectionsMatching}
+                    >
+                      <RadioButton.Item 
+                        label="1 - Matched (মিলে গেছে)" 
+                        value="1" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="2 - Not Matched (মেলেনি)" 
+                        value="2" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
+                        value="3" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
+                        value="4" 
+                        style={styles.radioItem}
+                      />
+                    </RadioButton.Group>
+                  </View>
+                )}
 
                 {/* Previous Loksabha Elections Matching */}
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>5. Is the Response Matching for the Previous 2024 Loksabha Election (Q7)? (উত্তরটি কি ২০২৪ সালের পূর্ববর্তী লোকসভা নির্বাচনের (প্রশ্ন ৭) সাথে মিলে যাচ্ছে?) *</Text>
-                  <Text style={styles.responseDisplayText}>Response: {verificationResponses.lokSabha2024}</Text>
-                  <RadioButton.Group
-                    onValueChange={(value) => handleVerificationFormChange('previousLoksabhaElectionsMatching', value)}
-                    value={verificationForm.previousLoksabhaElectionsMatching}
-                  >
-                    <RadioButton.Item 
-                      label="1 - Matched (মিলে গেছে)" 
-                      value="1" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="2 - Not Matched (মেলেনি)" 
-                      value="2" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
-                      value="3" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
-                      value="4" 
-                      style={styles.radioItem}
-                    />
-                  </RadioButton.Group>
-                </View>
+                {shouldShowVerificationQuestion('lokSabha2024') && (
+                  <View style={styles.formSection}>
+                    <Text style={styles.formLabel}>5. Is the Response Matching for the Previous 2024 Loksabha Election (Q6)? (উত্তরটি কি ২০২৪ সালের পূর্ববর্তী লোকসভা নির্বাচনের (প্রশ্ন ৬) সাথে মিলে যাচ্ছে?) *</Text>
+                    <Text style={styles.responseDisplayText}>Response: {verificationResponses.lokSabha2024}</Text>
+                    <RadioButton.Group
+                      onValueChange={(value) => handleVerificationFormChange('previousLoksabhaElectionsMatching', value)}
+                      value={verificationForm.previousLoksabhaElectionsMatching}
+                    >
+                      <RadioButton.Item 
+                        label="1 - Matched (মিলে গেছে)" 
+                        value="1" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="2 - Not Matched (মেলেনি)" 
+                        value="2" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
+                        value="3" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
+                        value="4" 
+                        style={styles.radioItem}
+                      />
+                    </RadioButton.Group>
+                  </View>
+                )}
 
                 {/* Name Matching */}
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>6. Name of the Respondent Matching? (উত্তরদাতার নাম কি মিলে গেছে?) *</Text>
-                  <Text style={styles.responseDisplayText}>Response: {verificationResponses.name}</Text>
-                  <RadioButton.Group
-                    onValueChange={(value) => handleVerificationFormChange('nameMatching', value)}
-                    value={verificationForm.nameMatching}
-                  >
-                    <RadioButton.Item 
-                      label="1 - Matched (মিলে গেছে)" 
-                      value="1" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="2 - Not Matched (মেলেনি)" 
-                      value="2" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
-                      value="3" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
-                      value="4" 
-                      style={styles.radioItem}
-                    />
-                  </RadioButton.Group>
-                </View>
+                {shouldShowVerificationQuestion('name') && (
+                  <View style={styles.formSection}>
+                    <Text style={styles.formLabel}>6. Name of the Respondent Matching? (উত্তরদাতার নাম কি মিলে গেছে?) *</Text>
+                    <Text style={styles.responseDisplayText}>Response: {verificationResponses.name}</Text>
+                    <RadioButton.Group
+                      onValueChange={(value) => handleVerificationFormChange('nameMatching', value)}
+                      value={verificationForm.nameMatching}
+                    >
+                      <RadioButton.Item 
+                        label="1 - Matched (মিলে গেছে)" 
+                        value="1" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="2 - Not Matched (মেলেনি)" 
+                        value="2" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
+                        value="3" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
+                        value="4" 
+                        style={styles.radioItem}
+                      />
+                    </RadioButton.Group>
+                  </View>
+                )}
 
                 {/* Age Matching */}
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>7. Is the Age matching? (বয়স কি মিলে গেছে?) *</Text>
-                  <Text style={styles.responseDisplayText}>Response: {verificationResponses.age}</Text>
-                  <RadioButton.Group
-                    onValueChange={(value) => handleVerificationFormChange('ageMatching', value)}
-                    value={verificationForm.ageMatching}
-                  >
-                    <RadioButton.Item 
-                      label="1 - Matched (মিলে গেছে)" 
-                      value="1" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="2 - Not Matched (মেলেনি)" 
-                      value="2" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
-                      value="3" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
-                      value="4" 
-                      style={styles.radioItem}
-                    />
-                  </RadioButton.Group>
-                </View>
+                {shouldShowVerificationQuestion('age') && (
+                  <View style={styles.formSection}>
+                    <Text style={styles.formLabel}>7. Is the Age matching? (বয়স কি মিলে গেছে?) *</Text>
+                    <Text style={styles.responseDisplayText}>Response: {verificationResponses.age}</Text>
+                    <RadioButton.Group
+                      onValueChange={(value) => handleVerificationFormChange('ageMatching', value)}
+                      value={verificationForm.ageMatching}
+                    >
+                      <RadioButton.Item 
+                        label="1 - Matched (মিলে গেছে)" 
+                        value="1" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="2 - Not Matched (মেলেনি)" 
+                        value="2" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="3 - Cannot hear the response clearly (উত্তর স্পষ্টভাবে শোনা যাচ্ছে না)" 
+                        value="3" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="4 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
+                        value="4" 
+                        style={styles.radioItem}
+                      />
+                    </RadioButton.Group>
+                  </View>
+                )}
 
                 {/* Phone Number Asked */}
-                <View style={styles.formSection}>
-                  <Text style={styles.formLabel}>8. Did the interviewer ask the phone number of the respondent? (সাক্ষাৎকারগ্রহণকারী কি উত্তরদাতার ফোন নম্বর জিজ্ঞাসা করেছিলেন?) *</Text>
-                  <RadioButton.Group
-                    onValueChange={(value) => handleVerificationFormChange('phoneNumberAsked', value)}
-                    value={verificationForm.phoneNumberAsked}
-                  >
-                    <RadioButton.Item 
-                      label="1 - Asked the number and noted in the questionnaire (নম্বরটি জিজ্ঞাসা করে প্রশ্নপত্রে নোট করা হয়েছে)" 
-                      value="1" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="2 - Asked the question but the respondent refused to share (প্রশ্নটি করা হয়েছে কিন্তু উত্তরদাতা শেয়ার করতে অস্বীকার করেছেন)" 
-                      value="2" 
-                      style={styles.radioItem}
-                    />
-                    <RadioButton.Item 
-                      label="3 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
-                      value="3" 
-                      style={styles.radioItem}
-                    />
-                  </RadioButton.Group>
-                </View>
+                {shouldShowVerificationQuestion('phoneNumber') && (
+                  <View style={styles.formSection}>
+                    <Text style={styles.formLabel}>8. Did the interviewer ask the phone number of the respondent? (সাক্ষাৎকারগ্রহণকারী কি উত্তরদাতার ফোন নম্বর জিজ্ঞাসা করেছিলেন?) *</Text>
+                    <RadioButton.Group
+                      onValueChange={(value) => handleVerificationFormChange('phoneNumberAsked', value)}
+                      value={verificationForm.phoneNumberAsked}
+                    >
+                      <RadioButton.Item 
+                        label="1 - Asked the number and noted in the questionnaire (নম্বরটি জিজ্ঞাসা করে প্রশ্নপত্রে নোট করা হয়েছে)" 
+                        value="1" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="2 - Asked the question but the respondent refused to share (প্রশ্নটি করা হয়েছে কিন্তু উত্তরদাতা শেয়ার করতে অস্বীকার করেছেন)" 
+                        value="2" 
+                        style={styles.radioItem}
+                      />
+                      <RadioButton.Item 
+                        label="3 - Did not ask (জিজ্ঞাসা করা হয়নি)" 
+                        value="3" 
+                        style={styles.radioItem}
+                      />
+                    </RadioButton.Group>
+                  </View>
+                )}
 
                 {/* Custom Feedback */}
                 <View style={styles.formSection}>
@@ -1229,10 +1366,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingBottom: 12,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+  },
+  stickyAudioSection: {
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    zIndex: 10,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  audioCard: {
+    marginBottom: 0,
+    elevation: 0,
   },
   scrollView: {
     flex: 1,
@@ -1388,6 +1542,14 @@ const styles = StyleSheet.create({
   },
   snackbar: {
     backgroundColor: '#1f2937',
+  },
+  collapsibleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  responsesContent: {
+    marginTop: 12,
   },
 });
 

@@ -133,19 +133,6 @@ export default function InterviewInterface({ navigation, route }: any) {
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
   const [showStationDropdown, setShowStationDropdown] = useState(false);
   
-  // Close other dropdown when one opens
-  useEffect(() => {
-    if (showGroupDropdown) {
-      setShowStationDropdown(false);
-    }
-  }, [showGroupDropdown]);
-  
-  useEffect(() => {
-    if (showStationDropdown) {
-      setShowGroupDropdown(false);
-    }
-  }, [showStationDropdown]);
-  
   // Quota management state
   const [genderQuotas, setGenderQuotas] = useState<any>(null);
   const [targetAudienceErrors, setTargetAudienceErrors] = useState<Map<string, string>>(new Map());
@@ -162,22 +149,43 @@ export default function InterviewInterface({ navigation, route }: any) {
   const [abandonReason, setAbandonReason] = useState<string>('');
   const [abandonNotes, setAbandonNotes] = useState<string>('');
   const [callLaterDate, setCallLaterDate] = useState<string>('');
+  
+  // State to track which Set is being shown in this interview
+  const [selectedSetNumber, setSelectedSetNumber] = useState<number | null>(null);
+  
+  // Close other dropdown when one opens
+  useEffect(() => {
+    if (showGroupDropdown) {
+      setShowStationDropdown(false);
+    }
+  }, [showGroupDropdown]);
+  
+  useEffect(() => {
+    if (showStationDropdown) {
+      setShowGroupDropdown(false);
+    }
+  }, [showStationDropdown]);
 
   // Get all questions from all sections
   const allQuestions = useMemo(() => {
-    const questions = [];
+    const questions: any[] = [];
+    
+    // Early return if survey is not available
+    if (!survey) {
+      return questions;
+    }
     
     // Debug survey data
     console.log('🔍 Survey data received:', {
-      surveyName: survey.surveyName,
-      sectionsCount: survey.sections ? survey.sections.length : 0,
-      questionsCount: survey.questions ? survey.questions.length : 0,
-      sections: survey.sections,
-      questions: survey.questions
+      surveyName: survey?.surveyName,
+      sectionsCount: survey?.sections ? survey.sections.length : 0,
+      questionsCount: survey?.questions ? survey.questions.length : 0,
+      sections: survey?.sections,
+      questions: survey?.questions
     });
     
     // Check if AC selection is required
-    const needsACSelection = requiresACSelection && assignedACs.length > 0;
+    const needsACSelection = requiresACSelection && assignedACs && assignedACs.length > 0;
     
     // Add AC selection question as first question if required
     if (needsACSelection) {
@@ -223,27 +231,96 @@ export default function InterviewInterface({ navigation, route }: any) {
         questions.push(pollingStationQuestion);
       }
     }
+
+    // Helper function to determine which Set to show for this interview
+    const determineSetNumber = (sessionId: string | null, survey: any): number | null => {
+      if (!sessionId || !survey) return null;
+      
+      // Find all unique set numbers in the survey
+      const setNumbers = new Set<number>();
+      survey.sections?.forEach((section: any) => {
+        section.questions?.forEach((question: any) => {
+          if (question.setsForThisQuestion && question.setNumber !== null && question.setNumber !== undefined) {
+            setNumbers.add(question.setNumber);
+          }
+        });
+      });
+      
+      if (setNumbers.size === 0) return null;
+      
+      // Use sessionId as seed to deterministically select a Set
+      const seed = parseInt(sessionId.slice(-8), 16) || 0;
+      const setArray = Array.from(setNumbers).sort((a, b) => a - b);
+      const selectedIndex = seed % setArray.length;
+      return setArray[selectedIndex];
+    };
+
+    // Helper function to check if question should be shown based on interview mode and sets logic
+    const shouldShowQuestion = (question: any, interviewMode: string, currentSetNumber: number | null): boolean => {
+      // Check CAPI/CATI visibility
+      if (interviewMode === 'capi' && question.enabledForCAPI === false) {
+        return false;
+      }
+      if (interviewMode === 'cati' && question.enabledForCATI === false) {
+        return false;
+      }
+      
+      // Check "Sets for this Question" logic
+      if (question.setsForThisQuestion) {
+        // If question has a set number, only show if it matches the selected set
+        if (question.setNumber !== null && question.setNumber !== undefined) {
+          // If no set is selected yet, we'll determine it
+          if (currentSetNumber === null) {
+            return false; // Don't show until set is determined
+          }
+          // Only show questions from the selected set
+          return question.setNumber === currentSetNumber;
+        }
+        // If setsForThisQuestion is true but no setNumber, treat as always show (backward compatibility)
+        return true;
+      }
+      
+      // Questions without Sets appear in all surveys
+      return true;
+    };
+
+    // Determine current interview mode
+    const interviewMode = isCatiMode ? 'cati' : 'capi';
     
-    // Add regular survey questions from sections
-    if (survey.sections && survey.sections.length > 0) {
+    // Determine which Set to show for this interview (if sets are used)
+    let currentSetNumber = selectedSetNumber;
+    if (currentSetNumber === null && sessionId) {
+      currentSetNumber = determineSetNumber(sessionId, survey);
+      if (currentSetNumber !== null) {
+        setSelectedSetNumber(currentSetNumber);
+      }
+    }
+    
+    // Add regular survey questions from sections (filtered by CAPI/CATI and sets logic)
+    if (survey?.sections && Array.isArray(survey.sections) && survey.sections.length > 0) {
       survey.sections.forEach((section: any, sectionIndex: number) => {
-        if (section.questions && section.questions.length > 0) {
+        if (section && section.questions && Array.isArray(section.questions) && section.questions.length > 0) {
           section.questions.forEach((question: any, questionIndex: number) => {
-            questions.push({
-              ...question,
-              sectionIndex,
-              questionIndex,
-              sectionId: section.id,
-              sectionTitle: section.title
-            });
+            if (!question) return; // Skip null/undefined questions
+            // Check if question should be shown
+            if (shouldShowQuestion(question, interviewMode, currentSetNumber)) {
+              questions.push({
+                ...question,
+                sectionIndex,
+                questionIndex,
+                sectionId: section?.id || `section-${sectionIndex}`,
+                sectionTitle: section?.title || 'Survey Section'
+              });
+            }
           });
         }
       });
     }
     
     // Add direct survey questions (not in sections)
-    if (survey.questions && survey.questions.length > 0) {
+    if (survey?.questions && Array.isArray(survey.questions) && survey.questions.length > 0) {
       survey.questions.forEach((question: any, questionIndex: number) => {
+        if (!question) return; // Skip null/undefined questions
         questions.push({
           ...question,
           sectionIndex: 0, // Default section for direct questions
@@ -294,9 +371,10 @@ export default function InterviewInterface({ navigation, route }: any) {
         const strVal = String(val);
         
         // If we have the target question and it has options, try to match the value to an option
-        if (targetQuestion && targetQuestion.options && Array.isArray(targetQuestion.options)) {
+        if (targetQuestion && 'options' in targetQuestion && targetQuestion.options && Array.isArray(targetQuestion.options)) {
           // Check if val matches any option.value or option.text (after stripping translations)
-          for (const option of targetQuestion.options) {
+          const options = (targetQuestion as any).options;
+          for (const option of options) {
             const optionValue = typeof option === 'object' ? (option.value || option.text) : option;
             const optionText = typeof option === 'object' ? option.text : option;
             
@@ -403,11 +481,18 @@ export default function InterviewInterface({ navigation, route }: any) {
 
   // Get visible questions based on conditional logic
   const visibleQuestions = useMemo(() => {
-    return allQuestions.filter((question: any) => evaluateConditions(question));
+    if (!allQuestions || allQuestions.length === 0) {
+      return [];
+    }
+    return allQuestions.filter((question: any) => question && evaluateConditions(question));
   }, [allQuestions, evaluateConditions]);
 
-  const currentQuestion = visibleQuestions[currentQuestionIndex];
-  const progress = (currentQuestionIndex + 1) / visibleQuestions.length;
+  const currentQuestion = visibleQuestions && visibleQuestions.length > 0 && currentQuestionIndex < visibleQuestions.length 
+    ? visibleQuestions[currentQuestionIndex] 
+    : null;
+  const progress = visibleQuestions && visibleQuestions.length > 0 
+    ? (currentQuestionIndex + 1) / visibleQuestions.length 
+    : 0;
 
   // Check audio permissions
   useEffect(() => {
@@ -443,6 +528,7 @@ export default function InterviewInterface({ navigation, route }: any) {
           if (!result.success) {
             // Interview failed to start - show error and navigate back
             const errorMsg = result.message || result.data?.message || 'Failed to start CATI interview';
+            console.error('❌ CATI interview failed to start:', errorMsg);
             Alert.alert(
               'Cannot Start Interview',
               errorMsg,
@@ -455,6 +541,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                 }
               ]
             );
+            setIsLoading(false);
             return; // Exit early - don't start the interview
           }
           
@@ -474,6 +561,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                 }
               ]
             );
+            setIsLoading(false);
             return; // Exit early - don't start the interview
           }
           
@@ -497,6 +585,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                 }
               ]
             );
+            setIsLoading(false);
             return; // Exit early - don't start the interview
           }
           
@@ -515,6 +604,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                 }
               ]
             );
+            setIsLoading(false);
             return; // Exit early - don't start the interview
           }
           
@@ -1872,9 +1962,35 @@ export default function InterviewInterface({ navigation, route }: any) {
     return null; // Valid gender
   };
 
+  // Helper function to check if a question is an age question (by ID or text, ignoring translations)
+  const isAgeQuestion = (question: any): boolean => {
+    if (!question) return false;
+    const questionText = getMainText(question.text || '').toLowerCase();
+    const questionId = question.id || '';
+    
+    // Check for fixed age question ID
+    if (questionId.includes('fixed_respondent_age')) {
+      return true;
+    }
+    
+    // Check for age question text (ignoring translations)
+    if (questionText.includes('could you please tell me your age') || 
+        questionText.includes('tell me your age') ||
+        questionText.includes('what is your age') ||
+        questionText.includes('your age in complete years') ||
+        questionText.includes('age in complete years')) {
+      return true;
+    }
+    
+    return false;
+  };
+
   // Validate fixed questions against target audience
   const validateFixedQuestion = (questionId: string, response: any) => {
-    if (questionId === 'fixed_respondent_age') {
+    const question = allQuestions.find(q => q.id === questionId);
+    
+    // Check if it's an age question (by ID or by text, ignoring translations)
+    if (questionId === 'fixed_respondent_age' || isAgeQuestion(question)) {
       return validateAge(response);
     } else if (questionId === 'fixed_respondent_gender') {
       return validateGender(response);
@@ -2696,10 +2812,13 @@ export default function InterviewInterface({ navigation, route }: any) {
     );
   }
 
-  if (!currentQuestion) {
+  // If interview hasn't started successfully, show error and allow navigation back
+  if (!isInterviewActive || !currentQuestion) {
     return (
       <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>No questions available</Text>
+        <Text style={styles.errorText}>
+          {!isInterviewActive ? 'Interview not started' : 'No questions available'}
+        </Text>
         <Button onPress={() => navigation.goBack()}>Go Back</Button>
       </View>
     );
@@ -2714,6 +2833,16 @@ export default function InterviewInterface({ navigation, route }: any) {
         <View style={styles.headerTop}>
           {/* Recording Indicator / Call Status and Abandon button */}
           <View style={styles.headerActions}>
+            {/* Translation Toggle - Left side */}
+            <View style={styles.translationToggleCompact}>
+              <Text style={styles.translationToggleLabelCompact}>🌐</Text>
+              <Switch
+                value={showTranslationOnly}
+                onValueChange={setShowTranslationOnly}
+                style={styles.translationToggleSwitch}
+              />
+            </View>
+            
             {/* CATI Call Status */}
             {isCatiMode && (
               <View style={styles.callStatusContainer}>
@@ -2818,19 +2947,47 @@ export default function InterviewInterface({ navigation, route }: any) {
               </View>
             )}
             
-            {/* Translation Toggle */}
-            <View style={styles.translationToggleContainer}>
-              <Text style={styles.translationToggleLabel}>Show Translation Only</Text>
-              <Switch
-                value={showTranslationOnly}
-                onValueChange={setShowTranslationOnly}
-              />
-            </View>
 
             <View style={styles.questionHeader}>
               <Text style={styles.questionText}>
+                {(() => {
+                  // Get question number - use custom questionNumber if available, otherwise generate from position
+                  let questionNumber = 'questionNumber' in currentQuestion ? (currentQuestion as any).questionNumber : undefined;
+                  if (!questionNumber && currentQuestion.sectionIndex !== undefined && currentQuestion.questionIndex !== undefined) {
+                    questionNumber = `${currentQuestion.sectionIndex + 1}.${currentQuestion.questionIndex + 1}`;
+                  } else if (!questionNumber) {
+                    // Fallback: find question in allQuestions to get position
+                    const questionPos = allQuestions.findIndex(q => q.id === currentQuestion.id);
+                    if (questionPos !== -1) {
+                      // Try to find section and question index
+                      let sectionIdx = 0;
+                      let qIdx = 0;
+                      let count = 0;
+                      if (survey && survey.sections) {
+                        for (let s = 0; s < survey.sections.length; s++) {
+                          for (let q = 0; q < survey.sections[s].questions.length; q++) {
+                            if (count === questionPos) {
+                              sectionIdx = s;
+                              qIdx = q;
+                              break;
+                            }
+                            count++;
+                          }
+                          if (count === questionPos) break;
+                        }
+                        questionNumber = `${sectionIdx + 1}.${qIdx + 1}`;
+                      } else {
+                        questionNumber = `${questionPos + 1}`;
+                      }
+                    }
+                  }
+                  return questionNumber ? `Q${questionNumber}: ` : '';
+                })()}
                 {getDisplayText(currentQuestion.text)}
                 {currentQuestion.required && <Text style={styles.requiredAsterisk}> *</Text>}
+                {currentQuestion.type === 'multiple_choice' && currentQuestion.settings?.allowMultiple && (
+                  <Text style={styles.multipleSelectionTag}> Multiple</Text>
+                )}
               </Text>
             </View>
             {currentQuestion.description && (
@@ -3175,6 +3332,22 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     pointerEvents: 'none',
   },
+  translationToggleCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+  },
+  translationToggleLabelCompact: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  translationToggleSwitch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
+  },
   translationToggleContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3185,6 +3358,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#bae6fd',
+  },
+  multipleSelectionTag: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2563eb',
+    backgroundColor: '#dbeafe',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginLeft: 8,
+    overflow: 'hidden',
   },
   translationToggleLabel: {
     fontSize: 14,

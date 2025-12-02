@@ -827,6 +827,15 @@ class ApiService {
         blob: response.data
       };
     } catch (error: any) {
+      // Silently handle 404 errors (recording not available) - this is expected
+      if (error.response?.status === 404 || error.status === 404) {
+        return {
+          success: false,
+          message: 'Recording not available',
+          error: null
+        };
+      }
+      // Only log unexpected errors
       console.error('Get CATI recording error:', error);
       return {
         success: false,
