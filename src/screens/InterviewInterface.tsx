@@ -107,6 +107,23 @@ export default function InterviewInterface({ navigation, route }: any) {
   // Helper function to get display text based on translation toggle
   const getDisplayText = (text: string | null | undefined): string => {
     if (!text) return '';
+    
+    // Handle multi-line descriptions with multiple translation blocks
+    // Split by \n\n to handle paragraphs, then parse each paragraph separately
+    if (text.includes('\n\n')) {
+      const paragraphs = text.split('\n\n');
+      return paragraphs.map((paragraph, index) => {
+        const parsed = parseTranslation(paragraph.trim());
+        // If toggle is ON and translation exists, show only translation
+        if (showTranslationOnly && parsed.translation) {
+          return (index > 0 ? '\n\n' : '') + parsed.translation;
+        }
+        // If toggle is OFF, show only main text (no translation)
+        return (index > 0 ? '\n\n' : '') + parsed.mainText;
+      }).join('');
+    }
+    
+    // Single line or no line breaks - parse normally
     const parsed = parseTranslation(text);
     // If toggle is ON and translation exists, show only translation
     if (showTranslationOnly && parsed.translation) {
@@ -239,26 +256,26 @@ export default function InterviewInterface({ navigation, route }: any) {
     
     // Add Consent Form question as the very first question (before AC/Polling Station)
     const consentFormMessage = isCatiMode 
-      ? `Namaste, my name is ${interviewerFirstName || 'Interviewer'}. We are calling from Convergent, an independent research organization. We are conducting a survey on social and political issues in West Bengal, interviewing thousands of people. I will ask you a few questions about government performance and your preferences. Your responses will remain strictly confidential and will only be analysed in combination with others. No personal details will ever be shared. The survey will take about 5–10 minutes, and your honest opinions will greatly help us.\n\nShould I Continue?`
-      : `Namaste, my name is ${interviewerFirstName || 'Interviewer'}. We are from Convergent, an independent research organization. We are conducting a survey on social and political issues in West Bengal, interviewing thousands of people. I will ask you a few questions about government performance and your preferences.\n\nYour responses will remain strictly confidential and will only be analysed in combination with others. No personal details will ever be shared. The survey will take about 5–10 minutes, and your honest opinions will greatly help us.\n\nShould I Continue?`;
+      ? `Namaste, my name is ${interviewerFirstName || 'Interviewer'}. We are calling from Convergent, an independent research organization. We are conducting a survey on social and political issues in West Bengal, interviewing thousands of people. I will ask you a few questions about government performance and your preferences. Your responses will remain strictly confidential and will only be analysed in combination with others. No personal details will ever be shared. The survey will take about 5–10 minutes, and your honest opinions will greatly help us. {নমস্কার, আমার নাম ${interviewerFirstName || 'Interviewer'}। আমরা কনভারজেন্ট থেকে বলছি, এটি একটি স্বাধীন গবেষণা সংস্থা। আমরা পশ্চিমবঙ্গে সামাজিক ও রাজনৈতিক বিষয় নিয়ে একটি সমীক্ষা করছি, যেখানে হাজার হাজার মানুষের সঙ্গে কথা বলা হচ্ছে। সরকার কতটা ভালো কাজ করছে এবং আপনার পছন্দ-অপছন্দ সম্পর্কে কিছু প্রশ্ন করব। আপনার সব উত্তর একদম গোপন রাখা হবে এবং শুধুমাত্র অন্যদের সঙ্গে মিলিয়ে বিশ্লেষণ করা হবে। কোন ব্যক্তিগত তথ্য কখনোই শেয়ার করা হবে না। এই সার্ভেটা প্রায় ৫–১০ মিনিট লাগবে, এবং আপনার সৎ মতামত আমাদের জন্য খুবই মূল্যবান।}\n\nShould I Continue? {আমি কি চালিয়ে যেতে পারি?}`
+      : `Namaste, my name is ${interviewerFirstName || 'Interviewer'}. We are from Convergent, an independent research organization. We are conducting a survey on social and political issues in West Bengal, interviewing thousands of people. I will ask you a few questions about government performance and your preferences. {নমস্কার, আমার নাম ${interviewerFirstName || 'Interviewer'}। আমরা কনভার্জেন্ট থেকে কথা বলছি, এটা একটা স্বাধীন গবেষণা সংস্থা। আমরা পশ্চিমবঙ্গের সামাজিক ও রাজনৈতিক বিষয় নিয়ে একটা সার্ভে করছি, যেখানে হাজার হাজার মানুষের মতামত নেওয়া হচ্ছে। আমি আপনাকে সরকারী কাজকর্ম আর আপনার পছন্দ-অপছন্দ নিয়ে কয়েকটা প্রশ্ন করব।}\n\nYour responses will remain strictly confidential and will only be analysed in combination with others. No personal details will ever be shared. The survey will take about 5–10 minutes, and your honest opinions will greatly help us. {আপনার দেওয়া তথ্য পুরোপুরি গোপন রাখা হবে এবং শুধু অন্যদের সঙ্গে মিলিয়ে বিশ্লেষণ করা হবে—কোনো ব্যক্তিগত তথ্য কখনোই শেয়ার করা হবে না। সার্ভেটা প্রায় ৫–১০ মিনিট লাগবে, আর আপনার সৎ মতামত আমাদের জন্য খুবই গুরুত্বপূর্ণ।}\n\nShould I Continue? {আমি কি চালিয়ে যেতে পারি?}`;
     
     const consentFormQuestion = {
       id: 'consent-form',
       type: 'single_choice',
-      text: 'Consent Form',
+      text: 'Consent Form {সম্মতিপত্র}',
       description: consentFormMessage,
       required: true,
       order: -2, // Make it appear first (before AC selection)
       options: [
         {
           id: 'consent-agree',
-          text: 'Yes',
+          text: 'Yes {হ্যাঁ}',
           value: '1',
           code: '1'
         },
         {
           id: 'consent-disagree',
-          text: 'No',
+          text: 'No {না}',
           value: '2',
           code: '2'
         }
@@ -266,7 +283,7 @@ export default function InterviewInterface({ navigation, route }: any) {
       sectionIndex: -2, // Special section for consent form
       questionIndex: -2,
       sectionId: 'consent-form',
-      sectionTitle: 'Consent Form',
+      sectionTitle: 'Consent Form {সম্মতিপত্র}',
       isConsentForm: true // Flag to identify this special question
     };
     questions.push(consentFormQuestion);
@@ -1097,6 +1114,7 @@ export default function InterviewInterface({ navigation, route }: any) {
   }, [startTime, isPaused]);
 
   // Cleanup any existing recording on component mount - ensure clean state
+  // This is critical for APK builds where native resources may persist
   useEffect(() => {
     const cleanupOnMount = async () => {
       // Always ensure globalRecording is null on mount
@@ -1104,14 +1122,44 @@ export default function InterviewInterface({ navigation, route }: any) {
         try {
           console.log('Cleaning up existing recording on mount...');
           const status = await globalRecording.getStatusAsync();
-          if (status.isRecording || status.canRecord) {
-            await globalRecording.stopAndUnloadAsync();
+          console.log('Mount cleanup - recording status:', status);
+          
+          // ALWAYS try to unload, regardless of status
+          // This is critical - even if just prepared (not started), we must unload
+          try {
+            if (status.isRecording || status.canRecord || status.isDoneRecording) {
+              await globalRecording.stopAndUnloadAsync();
+            } else {
+              // Even if status is unknown, try to unload
+              await globalRecording.stopAndUnloadAsync();
+            }
+          } catch (unloadError) {
+            console.log('Unload error on mount (will retry):', unloadError);
+            // Try one more time
+            try {
+              await globalRecording.stopAndUnloadAsync();
+            } catch (retryError) {
+              console.log('Retry unload on mount also failed:', retryError);
+            }
           }
         } catch (error) {
           console.log('Cleanup on mount error (non-fatal):', error);
         }
         globalRecording = null;
         setRecording(null);
+        
+        // Reset audio mode to clear any prepared state
+        try {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: false,
+            shouldDuckAndroid: false,
+          });
+          // Wait for native resources to release - longer for APK builds
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (modeError) {
+          console.log('Error resetting audio mode on mount:', modeError);
+        }
       }
     };
     cleanupOnMount();
@@ -1357,13 +1405,21 @@ export default function InterviewInterface({ navigation, route }: any) {
           // Try to stop anyway if status check failed
           try {
             await globalRecording.stopAndUnloadAsync();
-          } catch (stopError) {
-            console.log('Error stopping recording during cleanup:', stopError);
+        } catch (stopError) {
+          console.log('Error stopping recording during cleanup:', stopError);
+          // Try one more time with force
+          try {
+            await globalRecording.stopAndUnloadAsync();
+          } catch (retryError) {
+            console.log('Retry cleanup also failed:', retryError);
           }
         }
-        globalRecording = null;
-        // Wait longer for native resources to release
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      globalRecording = null;
+      setRecording(null);
+      // Wait longer for native resources to release - critical for APK builds
+      // APK builds need more time than Expo Go
+      await new Promise(resolve => setTimeout(resolve, 1500));
       }
       
       // Also reset audio mode to clear any prepared state
@@ -1647,11 +1703,19 @@ export default function InterviewInterface({ navigation, route }: any) {
       
       if (isPhoneQuestion) {
         const phoneResponse = responses[currentQuestion.id];
-        const validation = validatePhoneNumber(phoneResponse as string);
-        if (!validation.valid) {
-          showSnackbar(validation.message || 'Please enter a valid phone number.');
-          return;
+        
+        // Check if "refused to share phone number" is selected (stored as 0 or '0')
+        const didNotAnswer = phoneResponse === 0 || phoneResponse === '0' || phoneResponse === null || phoneResponse === undefined;
+        
+        // Only validate if "refused to share phone number" is NOT selected
+        if (!didNotAnswer) {
+          const validation = validatePhoneNumber(phoneResponse as string);
+          if (!validation.valid) {
+            showSnackbar(validation.message || 'Please enter a valid phone number.');
+            return;
+          }
         }
+        // If "refused to share phone number" is selected, allow proceeding without validation
       }
     }
     
@@ -1899,31 +1963,68 @@ export default function InterviewInterface({ navigation, route }: any) {
     try {
       console.log('=== EXPO-AV AUDIO RECORDING START ===');
       
-      // Step 1: Clean up any existing recording
+      // Step 1: Clean up any existing recording - CRITICAL for APK builds
       if (globalRecording) {
         try {
           console.log('Cleaning up existing recording...');
           const status = await globalRecording.getStatusAsync();
-          if (status.isRecording || status.canRecord) {
-            await globalRecording.stopAndUnloadAsync();
+          console.log('Existing recording status:', status);
+          
+          // ALWAYS try to unload, regardless of status
+          // This is critical - even if just prepared (not started), we must unload
+          try {
+            if (status.isRecording) {
+              await globalRecording.stopAndUnloadAsync();
+            } else if (status.canRecord || status.isDoneRecording) {
+              // If prepared but not started, or done recording, still unload
+              await globalRecording.stopAndUnloadAsync();
+            } else {
+              // Even if status is unknown, try to unload
+              await globalRecording.stopAndUnloadAsync();
+            }
+          } catch (unloadError: any) {
+            console.log('Unload error (will try alternative cleanup):', unloadError);
+            // Try alternative cleanup - just set to null and let garbage collection handle it
+            try {
+              // Force unload by calling stopAndUnloadAsync again
+              await globalRecording.stopAndUnloadAsync();
+            } catch (retryError) {
+              console.log('Retry unload also failed, proceeding with null assignment');
+            }
           }
         } catch (cleanupError) {
           console.log('Cleanup error (non-fatal):', cleanupError);
         }
         globalRecording = null;
         setRecording(null);
-        // Wait for native module to release (matching working version timing)
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait longer for native module to release in APK builds
+        // APK builds need more time than Expo Go
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
-      // Step 2: Request permissions first
+      // Step 2: Reset audio mode to clear any prepared state
+      // This is important to ensure no recording object is in prepared state
+      try {
+        console.log('Resetting audio mode to clear prepared state...');
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: false,
+          shouldDuckAndroid: false,
+        });
+        await new Promise(resolve => setTimeout(resolve, 300));
+      } catch (modeError) {
+        console.log('Error resetting audio mode (non-fatal):', modeError);
+      }
+      
+      // Step 3: Request permissions first
       console.log('Requesting audio permissions...');
       const { status: permStatus } = await Audio.requestPermissionsAsync();
       if (permStatus !== 'granted') {
+        isStartingRecording = false;
         throw new Error('Audio permission not granted');
       }
       
-      // Step 3: Set audio mode for recording (no reset first - like working version)
+      // Step 4: Set audio mode for recording
       console.log('Setting audio mode for recording...');
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -1932,14 +2033,14 @@ export default function InterviewInterface({ navigation, route }: any) {
         playThroughEarpieceAndroid: false,
       });
       
-      // Wait for audio mode to take effect
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Wait for audio mode to take effect - longer wait for APK builds
+      await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Step 4: Create recording object
+      // Step 5: Create recording object
       console.log('Creating new recording object...');
       const recording = new Audio.Recording();
       
-      // Step 5: Prepare recording (matching working version settings: mono, 128000 bitrate)
+      // Step 6: Prepare recording (matching working version settings: mono, 128000 bitrate)
       console.log('Preparing recording...');
       try {
         await recording.prepareToRecordAsync({
@@ -1966,29 +2067,45 @@ export default function InterviewInterface({ navigation, route }: any) {
         });
       } catch (prepareError: any) {
         console.error('Prepare error:', prepareError);
+        // Clean up the recording object if prepare failed
+        try {
+          const status = await recording.getStatusAsync();
+          if (status.canRecord || status.isDoneRecording) {
+            await recording.stopAndUnloadAsync();
+          }
+        } catch (cleanupErr) {
+          console.log('Error cleaning up failed prepare:', cleanupErr);
+        }
+        // Don't set recording to null - just don't assign it to globalRecording
         isStartingRecording = false; // Release lock before throwing
         throw new Error(`Failed to prepare recording: ${prepareError.message}`);
       }
       
-      // Step 6: Set globalRecording after successful preparation
+      // Step 7: Set globalRecording after successful preparation
       globalRecording = recording;
       setRecording(recording);
       
-      // Step 7: Wait before starting (Android MediaRecorder needs this)
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Step 8: Wait before starting (Android MediaRecorder needs this) - longer for APK
+      await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Step 8: Check status before starting
+      // Step 9: Check status before starting
       const statusBeforeStart = await recording.getStatusAsync();
       console.log('Status before start:', statusBeforeStart);
       
       if (!statusBeforeStart.canRecord) {
+        // Clean up if not ready
+        try {
+          await recording.stopAndUnloadAsync();
+        } catch (cleanupErr) {
+          console.log('Error cleaning up unready recording:', cleanupErr);
+        }
         globalRecording = null;
         setRecording(null);
         isStartingRecording = false; // Release lock before throwing
         throw new Error('Recording not ready - cannot start');
       }
       
-      // Step 9: Start recording
+      // Step 10: Start recording
       console.log('Starting recording...');
       try {
         await recording.startAsync();
@@ -2000,11 +2117,17 @@ export default function InterviewInterface({ navigation, route }: any) {
         throw new Error(`Failed to start recording: ${startError.message}`);
       }
       
-      // Step 10: Verify it actually started
+      // Step 11: Verify it actually started
       const statusAfterStart = await recording.getStatusAsync();
       console.log('Status after start:', statusAfterStart);
       
       if (!statusAfterStart.isRecording) {
+        // Clean up if start failed
+        try {
+          await recording.stopAndUnloadAsync();
+        } catch (cleanupErr) {
+          console.log('Error cleaning up failed start:', cleanupErr);
+        }
         globalRecording = null;
         setRecording(null);
         isStartingRecording = false; // Release lock before throwing
@@ -2029,12 +2152,20 @@ export default function InterviewInterface({ navigation, route }: any) {
       setRecording(null);
       isStartingRecording = false; // Always release lock on error
       
-      // Clean up on error
+      // Clean up on error - ensure proper cleanup
       if (globalRecording) {
         try {
           const status = await globalRecording.getStatusAsync();
-          if (status.isRecording) {
+          // Always try to unload, regardless of status
+          if (status.isRecording || status.canRecord || status.isDoneRecording) {
             await globalRecording.stopAndUnloadAsync();
+          } else {
+            // Even if status is unknown, try to unload
+            try {
+              await globalRecording.stopAndUnloadAsync();
+            } catch (unloadErr) {
+              console.log('Error unloading in error handler:', unloadErr);
+            }
           }
         } catch (cleanupError) {
           console.log('Error during error cleanup:', cleanupError);
@@ -3225,7 +3356,9 @@ export default function InterviewInterface({ navigation, route }: any) {
                     }
                   }}
                 />
-                <Text style={styles.checkboxLabel}>Did not Answer</Text>
+                <Text style={styles.checkboxLabel}>
+                  {getDisplayText('refused to share phone number {নম্বর দিতে চাননি}')}
+                </Text>
               </View>
             )}
           </View>
