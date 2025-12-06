@@ -99,13 +99,13 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
     if (!status) return '#6b7280';
     switch (status.toLowerCase()) {
       case 'active':
-      case 'approved': return '#059669';
-      case 'completed': return '#2563eb';
+      case 'approved': return '#3FADCC';
+      case 'completed': return '#001D48';
       case 'in_progress': return '#f59e0b';
       case 'pending_approval': return '#f59e0b';
       case 'rejected': return '#dc2626';
       case 'abandoned': return '#6b7280';
-      case 'submitted': return '#2563eb';
+      case 'submitted': return '#001D48';
       default: return '#6b7280';
     }
   };
@@ -142,7 +142,7 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2563eb" />
+        <ActivityIndicator size="large" color="#001D48" />
         <Text style={styles.loadingText}>Loading dashboard...</Text>
       </View>
     );
@@ -152,7 +152,7 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
     <View style={styles.container}>
       <StatusBar style="light" />
       <LinearGradient
-        colors={['#2563eb', '#7c3aed']}
+        colors={['#001D48', '#373177', '#3FADCC']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
@@ -187,8 +187,8 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
-            colors={['#2563eb']}
-            tintColor="#2563eb"
+            colors={['#001D48']}
+            tintColor="#001D48"
           />
         }
       >
@@ -230,7 +230,7 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
             <Button
               mode="text"
               onPress={() => navigation.navigate('AvailableSurveys')}
-              textColor="#2563eb"
+              textColor="#001D48"
               compact
             >
               View All
@@ -342,7 +342,7 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
             <Button
               mode="text"
               onPress={() => navigation.navigate('MyInterviews')}
-              textColor="#2563eb"
+              textColor="#001D48"
               compact
             >
               View All
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#2563eb',
+    color: '#001D48',
     marginBottom: 4,
   },
   statLabel: {
@@ -660,7 +660,7 @@ const styles = StyleSheet.create({
     margin: 16,
     right: 0,
     bottom: 0,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#001D48',
   },
   fabLabel: {
     color: '#ffffff',
@@ -691,16 +691,16 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   acChip: {
-    backgroundColor: '#dbeafe',
+    backgroundColor: '#E0F4F8',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#93c5fd',
+    borderColor: '#3FADCC',
   },
   acChipText: {
     fontSize: 10,
-    color: '#1e40af',
+    color: '#001D48',
     fontWeight: '500',
   },
   // Quick targeting styles

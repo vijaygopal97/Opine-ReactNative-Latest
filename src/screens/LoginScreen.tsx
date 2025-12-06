@@ -92,7 +92,7 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
     <View style={styles.container}>
       <StatusBar style="light" />
       <LinearGradient
-        colors={['#2563eb', '#7c3aed', '#059669']}
+        colors={['#001D48', '#373177', '#3FADCC']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradient}
@@ -168,7 +168,7 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
             {/* Footer */}
             <View style={styles.footer}>
               <Text style={styles.footerText}>
-                Convergent Interviewer App
+                Convergent App
               </Text>
               <Text style={styles.footerSubtext}>
                 Professional survey interviewing platform

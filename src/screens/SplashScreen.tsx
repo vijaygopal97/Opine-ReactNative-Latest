@@ -11,7 +11,7 @@ export default function SplashScreen() {
     <View style={styles.container}>
       <StatusBar style="light" />
       <LinearGradient
-        colors={['#2563eb', '#7c3aed', '#059669']}
+        colors={['#001D48', '#373177', '#3FADCC']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradient}
@@ -28,7 +28,7 @@ export default function SplashScreen() {
           
           {/* App Name */}
           <Text style={styles.appName}>Convergent</Text>
-          <Text style={styles.tagline}>Interviewer App</Text>
+          <Text style={styles.tagline}>Survey Platform</Text>
           
           {/* Loading indicator */}
           <View style={styles.loadingContainer}>

@@ -171,7 +171,7 @@ export default function MyInterviews({ navigation }: any) {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2563eb" />
+        <ActivityIndicator size="large" color="#001D48" />
         <Text style={styles.loadingText}>Loading interviews...</Text>
       </View>
     );
@@ -241,8 +241,8 @@ export default function MyInterviews({ navigation }: any) {
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
-            colors={['#2563eb']}
-            tintColor="#2563eb"
+            colors={['#001D48']}
+            tintColor="#001D48"
           />
         }
       >
@@ -531,7 +531,7 @@ const styles = StyleSheet.create({
   },
   continueButton: {
     flex: 1,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#001D48',
   },
   deleteButton: {
     flex: 1,
@@ -557,11 +557,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   clearButton: {
-    borderColor: '#2563eb',
+    borderColor: '#001D48',
     marginBottom: 16,
   },
   startButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#001D48',
   },
   snackbar: {
     backgroundColor: '#dc2626',

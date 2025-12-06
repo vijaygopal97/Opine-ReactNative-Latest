@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Convergent Interviewer",
-    "slug": "convergent-interviewer",
+    "name": "Convergent",
+    "slug": "opine-interviewer",
     "version": "5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

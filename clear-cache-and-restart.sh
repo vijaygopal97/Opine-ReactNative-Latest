@@ -35,3 +35,4 @@ echo "   - If using Expo Go, you may need to reload the app (shake device -> Rel
 echo "   - For native builds, you MUST rebuild: npx expo prebuild --clean"
 echo "   - The native splash screen requires a rebuild to update"
 
+

@@ -1,4 +1,4 @@
-# Convergent Interviewer App
+# Convergent App
 
 A React Native mobile application for interviewers to conduct surveys using the Convergent platform. This app provides native GPS access and audio recording capabilities that are essential for Computer-Assisted Personal Interviewing (CAPI).
 

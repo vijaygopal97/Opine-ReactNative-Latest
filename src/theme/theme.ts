@@ -4,12 +4,12 @@ export const theme = {
   ...MD3LightTheme,
   colors: {
     ...MD3LightTheme.colors,
-    primary: '#2563eb', // Blue
-    primaryContainer: '#dbeafe',
-    secondary: '#7c3aed', // Purple
-    secondaryContainer: '#ede9fe',
-    tertiary: '#059669', // Green
-    tertiaryContainer: '#d1fae5',
+    primary: '#001D48', // Convergent Dark Navy Blue
+    primaryContainer: '#E6F0F8',
+    secondary: '#373177', // Convergent Purple-Blue
+    secondaryContainer: '#E8E6F5',
+    tertiary: '#3FADCC', // Convergent Cyan-Blue
+    tertiaryContainer: '#E0F4F8',
     surface: '#ffffff',
     surfaceVariant: '#f8fafc',
     background: '#f8fafc',

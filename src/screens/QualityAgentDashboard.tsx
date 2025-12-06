@@ -204,7 +204,7 @@ export default function QualityAgentDashboard({ navigation, user, onLogout }: Qu
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2563eb" />
+        <ActivityIndicator size="large" color="#001D48" />
         <Text style={styles.loadingText}>Loading dashboard...</Text>
       </View>
     );
@@ -214,7 +214,7 @@ export default function QualityAgentDashboard({ navigation, user, onLogout }: Qu
     <View style={styles.container}>
       <StatusBar style="light" />
       <LinearGradient
-        colors={['#2563eb', '#7c3aed']}
+        colors={['#001D48', '#373177', '#3FADCC']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
@@ -249,8 +249,8 @@ export default function QualityAgentDashboard({ navigation, user, onLogout }: Qu
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
-            colors={['#2563eb']}
-            tintColor="#2563eb"
+            colors={['#001D48']}
+            tintColor="#001D48"
           />
         }
       >
@@ -418,7 +418,7 @@ const styles = StyleSheet.create({
   statNumberLarge: {
     fontSize: 48,
     fontWeight: 'bold',
-    color: '#2563eb',
+    color: '#001D48',
     marginBottom: 8,
   },
   statLabelLarge: {
@@ -465,7 +465,7 @@ const styles = StyleSheet.create({
   },
   startButton: {
     marginTop: 8,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#001D48',
   },
   releaseButton: {
     marginTop: 12,
