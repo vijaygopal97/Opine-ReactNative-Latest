@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, Dimensions, Image } from 'react-native';
 import { Text } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -19,13 +19,15 @@ export default function SplashScreen() {
         <View style={styles.content}>
           {/* Logo/Icon */}
           <View style={styles.logoContainer}>
-            <View style={styles.logo}>
-              <Text style={styles.logoText}>O</Text>
-            </View>
+            <Image 
+              source={require('../../assets/icon.png')} 
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </View>
           
           {/* App Name */}
-          <Text style={styles.appName}>Opine</Text>
+          <Text style={styles.appName}>Convergent</Text>
           <Text style={styles.tagline}>Interviewer App</Text>
           
           {/* Loading indicator */}
@@ -57,20 +59,10 @@ const styles = StyleSheet.create({
   logoContainer: {
     marginBottom: 30,
   },
-  logo: {
+  logoImage: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  logoText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#ffffff',
   },
   appName: {
     fontSize: 36,

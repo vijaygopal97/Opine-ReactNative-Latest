@@ -7,6 +7,7 @@ import {
   Platform,
   Alert,
   Dimensions,
+  Image,
 } from 'react-native';
 import {
   Text,
@@ -107,9 +108,11 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
             {/* Header */}
             <View style={styles.header}>
               <View style={styles.logoContainer}>
-                <View style={styles.logo}>
-                  <Text style={styles.logoText}>O</Text>
-                </View>
+                <Image 
+                  source={require('../../assets/icon.png')} 
+                  style={styles.logoImage}
+                  resizeMode="contain"
+                />
               </View>
               <Text style={styles.title}>Welcome Back</Text>
               <Text style={styles.subtitle}>Sign in to continue</Text>
@@ -165,7 +168,7 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
             {/* Footer */}
             <View style={styles.footer}>
               <Text style={styles.footerText}>
-                Opine Interviewer App
+                Convergent Interviewer App
               </Text>
               <Text style={styles.footerSubtext}>
                 Professional survey interviewing platform
@@ -210,20 +213,10 @@ const styles = StyleSheet.create({
   logoContainer: {
     marginBottom: 20,
   },
-  logo: {
+  logoImage: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  logoText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#ffffff',
   },
   title: {
     fontSize: 28,

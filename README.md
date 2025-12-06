@@ -1,6 +1,6 @@
-# Opine Interviewer App
+# Convergent Interviewer App
 
-A React Native mobile application for interviewers to conduct surveys using the Opine platform. This app provides native GPS access and audio recording capabilities that are essential for Computer-Assisted Personal Interviewing (CAPI).
+A React Native mobile application for interviewers to conduct surveys using the Convergent platform. This app provides native GPS access and audio recording capabilities that are essential for Computer-Assisted Personal Interviewing (CAPI).
 
 ## Features
 
@@ -114,7 +114,7 @@ npm run web
 ## Configuration
 
 ### Backend API
-The app is configured to connect to the Opine backend at:
+The app is configured to connect to the Convergent backend at:
 ```
 https://opine.exypnossolutions.com
 ```
@@ -213,6 +213,6 @@ For technical support or questions:
 
 ## License
 
-This project is proprietary software for the Opine platform.
+This project is proprietary software for the Convergent platform.
 
 

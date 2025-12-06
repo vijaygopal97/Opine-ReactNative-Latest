@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Opine Interviewer",
-    "slug": "opine-interviewer",
+    "name": "Convergent Interviewer",
+    "slug": "convergent-interviewer",
     "version": "5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -39,7 +39,7 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "package": "com.opineinterviewer"
+      "package": "com.convergentinterviewer"
     },
     "web": {
       "favicon": "./assets/favicon.png"
