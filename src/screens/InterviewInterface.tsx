@@ -254,6 +254,68 @@ export default function InterviewInterface({ navigation, route }: any) {
     
     // Removed excessive logging - survey data debug
     
+    // Add Call Status question as the very first question for CATI interviews
+    if (isCatiMode) {
+      const callStatusQuestion = {
+        id: 'call-status',
+        type: 'single_choice',
+        text: 'Call Status {কলের অবস্থা}',
+        description: 'Please select the status of the call attempt.',
+        required: true,
+        order: -4, // Make it appear first (before interviewer ID and consent form)
+        options: [
+          {
+            id: 'call-connected',
+            text: 'Call Connected {কল সংযুক্ত হয়েছে}',
+            value: 'call_connected',
+            code: 'call_connected'
+          },
+          {
+            id: 'busy',
+            text: 'Busy {ব্যস্ত}',
+            value: 'busy',
+            code: 'busy'
+          },
+          {
+            id: 'switched-off',
+            text: 'Switched Off {সুইচ অফ}',
+            value: 'switched_off',
+            code: 'switched_off'
+          },
+          {
+            id: 'not-reachable',
+            text: 'Not Reachable {পৌঁছানো যায়নি}',
+            value: 'not_reachable',
+            code: 'not_reachable'
+          },
+          {
+            id: 'did-not-pick-up',
+            text: 'Did Not Pick Up {উত্তর দেননি}',
+            value: 'did_not_pick_up',
+            code: 'did_not_pick_up'
+          },
+          {
+            id: 'number-does-not-exist',
+            text: 'Number Does Not Exist {নম্বর বিদ্যমান নেই}',
+            value: 'number_does_not_exist',
+            code: 'number_does_not_exist'
+          },
+          {
+            id: 'didnt-get-call',
+            text: "Didn't Get Call {কল পাননি}",
+            value: 'didnt_get_call',
+            code: 'didnt_get_call'
+          }
+        ],
+        sectionIndex: -4, // Special section for call status
+        questionIndex: -4,
+        sectionId: 'call-status',
+        sectionTitle: 'Call Status {কলের অবস্থা}',
+        isCallStatus: true // Flag to identify this special question
+      };
+      questions.push(callStatusQuestion);
+    }
+    
     // Check if this is the target survey for Interviewer ID question
     const isTargetSurvey = survey && (survey._id === '68fd1915d41841da463f0d46' || survey.id === '68fd1915d41841da463f0d46');
     
@@ -265,7 +327,7 @@ export default function InterviewInterface({ navigation, route }: any) {
         text: 'Enter Interviewer ID {সাক্ষাৎকারকারীর আইডি লিখুন}',
         description: '',
         required: false, // Optional question
-        order: -3, // Make it appear before Consent Form
+        order: -3, // Make it appear before Consent Form (after Call Status for CATI)
         sectionIndex: -3, // Special section for interviewer ID
         questionIndex: -3,
         sectionId: 'interviewer-id',
@@ -277,6 +339,26 @@ export default function InterviewInterface({ navigation, route }: any) {
         }
       };
       questions.push(interviewerIdQuestion);
+      
+      // Add "Enter Supervisor ID" question after Interviewer ID
+      const supervisorIdQuestion = {
+        id: 'supervisor-id',
+        type: 'numeric',
+        text: 'Enter Supervisor ID {সুপারভাইজার আইডি লিখুন}',
+        description: '',
+        required: false, // Optional question
+        order: -2.5, // Make it appear after Interviewer ID but before Consent Form
+        sectionIndex: -2.5, // Special section for supervisor ID
+        questionIndex: -2.5,
+        sectionId: 'supervisor-id',
+        sectionTitle: 'Supervisor ID',
+        isSupervisorId: true, // Flag to identify this special question
+        validation: {
+          maxValue: 99999, // Max 5 digits
+          minValue: 0
+        }
+      };
+      questions.push(supervisorIdQuestion);
     }
     
     // Add Consent Form question as the very first question (before AC/Polling Station)
@@ -475,9 +557,32 @@ export default function InterviewInterface({ navigation, route }: any) {
     return questions;
   }, [survey.sections, survey.questions, requiresACSelection, assignedACs, selectedAC, availableGroups, availablePollingStations, selectedPollingStation.groupName, selectedPollingStation.stationName, interviewerFirstName, isCatiMode, selectedSetNumber]);
   
-  // Check if consent form is disagreed - if so, show Submit button directly
+  // Check consent form response
   const consentResponse = responses['consent-form'];
-  const isConsentDisagreed = consentResponse === '2' || consentResponse === 2;
+  // Check for various possible values: '2', 2, 'consent-disagree', or the option ID
+  const isConsentDisagreed = consentResponse === '2' || 
+                             consentResponse === 2 || 
+                             consentResponse === 'consent-disagree' ||
+                             String(consentResponse).toLowerCase().includes('disagree') ||
+                             String(consentResponse).toLowerCase() === 'no';
+  // If consent is "No" AND we're on the consent form question, show Abandon button (similar to call status)
+  // Show Abandon button whenever consent is disagreed (similar to how call status works)
+  const shouldShowAbandonForConsent = isConsentDisagreed && currentQuestion?.id === 'consent-form';
+  
+  // Debug logging
+  console.log('🔍 Consent check:', {
+    consentResponse,
+    currentQuestionId: currentQuestion?.id,
+    isConsentDisagreed,
+    shouldShowAbandonForConsent,
+    responsesKeys: Object.keys(responses)
+  });
+  
+  // Check call status for CATI interviews
+  const callStatusResponse = responses['call-status'];
+  const isCallConnected = callStatusResponse === 'call_connected';
+  const hasCallStatusResponse = callStatusResponse !== null && callStatusResponse !== undefined && callStatusResponse !== '';
+  const shouldShowSubmitForCallStatus = isCatiMode && hasCallStatusResponse && !isCallConnected;
 
   // Helper function to check if response has content
   const hasResponseContent = (response: any): boolean => {
@@ -1126,8 +1231,19 @@ export default function InterviewInterface({ navigation, route }: any) {
   }, [survey._id, isCatiMode]); // Include isCatiMode in dependencies
 
   // Update duration
+  // For CATI interviews, only start timer after call status question is passed (call_connected selected)
   useEffect(() => {
     if (!startTime || isPaused) return;
+    
+    // For CATI, check if call status is connected before starting timer
+    if (isCatiMode) {
+      const callStatusResponse = responses['call-status'];
+      const isCallConnected = callStatusResponse === 'call_connected';
+      if (!isCallConnected) {
+        // Don't start timer if call is not connected
+        return;
+      }
+    }
 
     const interval = setInterval(() => {
       const now = new Date();
@@ -1136,7 +1252,7 @@ export default function InterviewInterface({ navigation, route }: any) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [startTime, isPaused]);
+  }, [startTime, isPaused, isCatiMode, responses]);
 
   // Cleanup any existing recording on component mount - ensure clean state
   // This is critical for APK builds where native resources may persist
@@ -1679,6 +1795,42 @@ export default function InterviewInterface({ navigation, route }: any) {
   const goToNextQuestion = () => {
     const currentQuestion = visibleQuestions[currentQuestionIndex];
     
+    // For CATI interviews, check call status question
+    if (isCatiMode && currentQuestion && currentQuestion.id === 'call-status') {
+      const callStatusResponse = responses['call-status'];
+      if (!callStatusResponse) {
+        showSnackbar('Please select a call status before proceeding.');
+        return;
+      }
+      
+      // If call is not connected, don't allow moving to next question
+      // User should submit instead
+      if (callStatusResponse !== 'call_connected') {
+        showSnackbar('Please submit the interview with the selected call status.');
+        return;
+      }
+      
+      // Call is connected, reset timer to 0 and set startTime to now
+      // Timer will start automatically via useEffect after this
+      setDuration(0);
+      setStartTime(new Date());
+    }
+    
+    // Check consent form question - if "No" is selected, don't allow moving forward
+    if (currentQuestion && currentQuestion.id === 'consent-form') {
+      const consentResponse = responses['consent-form'];
+      const isConsentDisagreed = consentResponse === '2' || 
+                                 consentResponse === 2 || 
+                                 consentResponse === 'consent-disagree' ||
+                                 String(consentResponse).toLowerCase().includes('disagree') ||
+                                 String(consentResponse).toLowerCase() === 'no';
+      
+      if (isConsentDisagreed) {
+        showSnackbar('Please abandon the interview using the Abandon button.');
+        return;
+      }
+    }
+    
     // Check geofencing error for polling station questions (only if booster is not enabled)
     if (geofencingError && (currentQuestion as any)?.isPollingStationSelection && !locationControlBooster) {
       showSnackbar(geofencingError);
@@ -1825,25 +1977,33 @@ export default function InterviewInterface({ navigation, route }: any) {
     }
   };
 
-  const abandonInterview = async () => {
+  const abandonInterview = async (reasonOverride: string | null = null) => {
     try {
       if (isCatiMode && catiQueueId) {
         // CATI mode - use CATI abandon endpoint
-        // No mapping needed - React Native now uses the same values as web/backend
-        // If call failed, reason is optional
-        const reasonToSend = callStatus === 'failed' ? (abandonReason || null) : abandonReason;
-        const notesToSend = abandonNotes && abandonNotes.trim() ? abandonNotes : undefined;
+        // Check if this is consent refusal
+        const consentResponse = responses['consent-form'];
+        const isConsentRefused = consentResponse === '2' || consentResponse === 2;
+        
+        // If reasonOverride is provided (e.g., 'consent_refused'), use it
+        const reasonToSend = reasonOverride || (isConsentRefused ? 'consent_refused' : (callStatus === 'failed' ? (abandonReason || null) : abandonReason));
+        const notesToSend = reasonOverride === 'consent_refused' ? 'Consent form: No' : (abandonNotes && abandonNotes.trim() ? abandonNotes : undefined);
         const dateToSend = (abandonReason === 'call_later' && callLaterDate && callLaterDate.trim()) ? callLaterDate : undefined;
+        
+        // Get call status for stats (if call was connected but consent refused)
+        const callStatusResponse = responses['call-status'];
+        const callStatusForStats = isConsentRefused ? null : callStatusResponse; // Don't pass call status if consent refused (call was connected)
         
         const result = await apiService.abandonCatiInterview(
           catiQueueId,
           reasonToSend,
           notesToSend,
-          dateToSend
+          dateToSend,
+          callStatusForStats
         );
         
         if (result.success) {
-          showSnackbar('Interview abandoned');
+          showSnackbar(isConsentRefused ? 'Interview abandoned. Consent refusal recorded for reporting.' : 'Interview abandoned');
           navigation.navigate('Dashboard');
         } else {
           const errorMsg = result.message || 'Failed to abandon interview';
@@ -1932,7 +2092,8 @@ export default function InterviewInterface({ navigation, route }: any) {
             });
           });
           
-          // Prepare metadata
+          // Prepare metadata with abandonment reason
+          const finalAbandonReason = abandonReason === 'other' ? abandonNotes.trim() : abandonReason;
           const metadata = {
             selectedAC: selectedAC || null,
             selectedPollingStation: selectedPollingStation || null,
@@ -1944,22 +2105,27 @@ export default function InterviewInterface({ navigation, route }: any) {
               totalPauseTime: 0,
               totalPauses: 0
             },
-            setNumber: selectedSetNumber || null
+            setNumber: selectedSetNumber || null,
+            abandonedReason: finalAbandonReason,
+            abandonmentNotes: abandonReason !== 'other' ? abandonNotes : null
           };
           
           
           const result = await apiService.abandonInterview(sessionId, finalResponses, metadata);
           
           if (result.success) {
+            setShowAbandonConfirm(false);
+            setAbandonReason('');
+            setAbandonNotes('');
             if (result.response?.data?.responseId) {
               showSnackbar(`Interview abandoned. Response saved (ID: ${result.response.data.responseId})`);
             } else {
               showSnackbar('Interview abandoned');
             }
+            navigation.navigate('Dashboard');
           } else {
-            showSnackbar(result.message || 'Interview abandoned (no valid responses to save)');
+            showSnackbar(result.message || 'Failed to abandon interview');
           }
-          navigation.navigate('Dashboard');
         } catch (error: any) {
           console.error('Error abandoning interview:', error);
           showSnackbar('Failed to abandon interview');
@@ -2281,9 +2447,19 @@ export default function InterviewInterface({ navigation, route }: any) {
   const validateRequiredQuestions = () => {
     const unansweredRequiredQuestions: Array<{question: any, index: number}> = [];
     
+    // For CATI interviews, if call status is not connected, skip consent form validation
+    const callStatusResponse = responses['call-status'];
+    const isCallConnected = callStatusResponse === 'call_connected';
+    const shouldSkipConsentCheck = isCatiMode && callStatusResponse && !isCallConnected;
+    
     // Check all visible questions (questions that were actually shown to the user)
     visibleQuestions.forEach((question, index) => {
       if (question.required) {
+        // Skip consent form validation if call is not connected
+        if (shouldSkipConsentCheck && question.id === 'consent-form') {
+          return; // Skip this question
+        }
+        
         const response = responses[question.id];
         const hasValidResponse = response !== null && 
                                 response !== undefined && 
@@ -2305,8 +2481,117 @@ export default function InterviewInterface({ navigation, route }: any) {
   const completeInterview = async () => {
     if (!sessionId) return;
 
-    // If consent form is disagreed, only save consent response
-    if (isConsentDisagreed) {
+    // Check if consent form is "No" - if so, abandon instead of complete
+    const consentResponse = responses['consent-form'];
+    const isConsentDisagreed = consentResponse === '2' || consentResponse === 2;
+    const shouldAbandonForConsent = isConsentDisagreed;
+    
+    // If consent form is "No", abandon the interview
+    if (shouldAbandonForConsent && catiQueueId) {
+      try {
+        setIsLoading(true);
+        
+        const result = await apiService.abandonCatiInterview(
+          catiQueueId,
+          'consent_refused',
+          'Consent form: No',
+          null, // No call later date
+          null // No call status (call was connected, consent was refused)
+        );
+        
+        if (result.success) {
+          Alert.alert(
+            'Interview Abandoned',
+            'Interview abandoned. Consent refusal recorded for reporting.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Dashboard' }],
+                  });
+                },
+              },
+            ]
+          );
+        } else {
+          const errorMsg = result.message || 'Failed to abandon interview';
+          showSnackbar(errorMsg);
+        }
+      } catch (error: any) {
+        console.error('Error abandoning interview due to consent refusal:', error);
+        showSnackbar(error.message || 'Failed to abandon interview');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // If call status is not connected (CATI), abandon instead of complete
+    const callStatusResponse = responses['call-status'];
+    const isCallConnected = callStatusResponse === 'call_connected';
+    const shouldAbandonForCallStatus = isCatiMode && callStatusResponse && !isCallConnected;
+    
+    // If call status is not connected, abandon the interview
+    if (shouldAbandonForCallStatus && catiQueueId) {
+      try {
+        setIsLoading(true);
+        
+        // Map call status to abandonment reason
+        const statusToReasonMap: { [key: string]: string } = {
+          'busy': 'busy',
+          'switched_off': 'switched_off',
+          'not_reachable': 'not_reachable',
+          'did_not_pick_up': 'no_answer',
+          'number_does_not_exist': 'does_not_exist',
+          'didnt_get_call': 'technical_issue'
+        };
+        
+        const abandonmentReason = statusToReasonMap[callStatusResponse] || callStatusResponse;
+        
+        const result = await apiService.abandonCatiInterview(
+          catiQueueId,
+          abandonmentReason,
+          `Call status: ${callStatusResponse}`,
+          null, // No call later date
+          callStatusResponse // Pass call status for stats
+        );
+        
+        if (result.success) {
+          Alert.alert(
+            'Interview Abandoned',
+            'Interview abandoned. Call status recorded for reporting.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Dashboard' }],
+                  });
+                }
+              }
+            ]
+          );
+        } else {
+          showSnackbar(result.message || 'Failed to abandon interview');
+        }
+      } catch (error) {
+        console.error('Error abandoning interview:', error);
+        showSnackbar('Failed to abandon interview');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // If call status is not connected (CATI), skip consent form check and proceed with submission
+    // For CATI interviews, if call status is not connected, consent form doesn't matter
+    const shouldSkipConsentCheck = isCatiMode && callStatusResponse && !isCallConnected;
+    
+    // If consent form is disagreed, only save consent response (unless call is not connected)
+    if (isConsentDisagreed && !shouldSkipConsentCheck) {
       const consentQuestion = allQuestions.find((q: any) => q.id === 'consent-form');
       if (consentQuestion) {
         try {
@@ -2361,9 +2646,9 @@ export default function InterviewInterface({ navigation, route }: any) {
           } else {
             showSnackbar('Failed to complete interview');
           }
-        } catch (error) {
-          console.error('Error completing interview:', error);
-          showSnackbar('Failed to complete interview');
+        } catch (error: any) {
+          console.error('Error abandoning interview:', error);
+          showSnackbar(error.message || 'Failed to abandon interview');
         } finally {
           setIsLoading(false);
         }
@@ -2606,13 +2891,19 @@ export default function InterviewInterface({ navigation, route }: any) {
         };
       });
 
-      // Extract interviewer ID from responses (for survey 68fd1915d41841da463f0d46)
+      // Extract interviewer ID and supervisor ID from responses (for survey 68fd1915d41841da463f0d46)
       const isTargetSurvey = survey && (survey._id === '68fd1915d41841da463f0d46' || survey.id === '68fd1915d41841da463f0d46');
       let oldInterviewerID: string | null = null;
+      let supervisorID: string | null = null;
       if (isTargetSurvey) {
         const interviewerIdResponse = responses['interviewer-id'];
         if (interviewerIdResponse !== null && interviewerIdResponse !== undefined && interviewerIdResponse !== '') {
           oldInterviewerID = String(interviewerIdResponse);
+        }
+        
+        const supervisorIdResponse = responses['supervisor-id'];
+        if (supervisorIdResponse !== null && supervisorIdResponse !== undefined && supervisorIdResponse !== '') {
+          supervisorID = String(supervisorIdResponse);
         }
       }
 
@@ -2648,6 +2939,11 @@ export default function InterviewInterface({ navigation, route }: any) {
         }
         
         
+        // Extract call status from responses
+        const callStatusResponse = responses['call-status'];
+        // Determine final call status: if call_connected was selected, use 'success', otherwise use the selected status
+        const finalCallStatus = callStatusResponse === 'call_connected' ? 'success' : (callStatusResponse || 'unknown');
+        
         result = await apiService.completeCatiInterview(catiQueueId, {
           sessionId: sessionId,
           responses: finalResponses,
@@ -2672,7 +2968,9 @@ export default function InterviewInterface({ navigation, route }: any) {
           answeredQuestions: answeredCount,
           completionPercentage: totalCount > 0 ? Math.round((answeredCount / totalCount) * 100) : 0,
           setNumber: finalSetNumber, // Save which Set was shown in this CATI interview
-          OldinterviewerID: oldInterviewerID // Save old interviewer ID
+          OldinterviewerID: oldInterviewerID, // Save old interviewer ID
+          callStatus: finalCallStatus, // Send call status to backend
+          supervisorID: supervisorID // Save supervisor ID
         });
       } else {
         // CAPI mode - use standard complete endpoint
@@ -2731,7 +3029,8 @@ export default function InterviewInterface({ navigation, route }: any) {
             skippedQuestions: finalResponses.filter((r: any) => !hasResponseContent(r.response)).length,
             completionPercentage: Math.round((finalResponses.filter((r: any) => hasResponseContent(r.response)).length / allQuestions.length) * 100),
             setNumber: null, // Sets don't apply to CAPI - always null
-            OldinterviewerID: oldInterviewerID // Save old interviewer ID
+            OldinterviewerID: oldInterviewerID, // Save old interviewer ID
+            supervisorID: supervisorID // Save supervisor ID
           }
         });
       }
@@ -4140,9 +4439,13 @@ export default function InterviewInterface({ navigation, route }: any) {
                   // Get question number - use custom questionNumber if available, otherwise generate from position
                   let questionNumber = 'questionNumber' in currentQuestion ? (currentQuestion as any).questionNumber : undefined;
                   
-                  // Special handling for consent form and AC selection
-                  if (currentQuestion.id === 'interviewer-id') {
+                  // Special handling for call status, interviewer ID, supervisor ID, consent form and AC selection
+                  if (currentQuestion.id === 'call-status') {
                     questionNumber = '0.001';
+                  } else if (currentQuestion.id === 'interviewer-id') {
+                    questionNumber = '0.002';
+                  } else if (currentQuestion.id === 'supervisor-id') {
+                    questionNumber = '0.003';
                   } else if (currentQuestion.id === 'consent-form') {
                     questionNumber = '0.0';
                   } else if (currentQuestion.id === 'ac-selection') {
@@ -4255,6 +4558,34 @@ export default function InterviewInterface({ navigation, route }: any) {
                   // MP/MLA names will be displayed when available
                   return null;
                 })()}
+                {/* Show AC name for registered voter question - only for survey "68fd1915d41841da463f0d46" */}
+                {(() => {
+                  if (!currentQuestion) return null;
+                  
+                  // Only for target survey
+                  const isTargetSurvey = survey && (survey._id === '68fd1915d41841da463f0d46' || survey.id === '68fd1915d41841da463f0d46');
+                  if (!isTargetSurvey) return null;
+                  
+                  const questionText = (currentQuestion.text || '').toLowerCase();
+                  const questionId = currentQuestion.id || '';
+                  
+                  // Check if this is the registered voter question
+                  const isRegisteredVoterQuestion = questionText.includes('are you a registered voter') ||
+                                                    questionText.includes('registered voter') ||
+                                                    questionText.includes('নিবন্ধিত ভোটার') ||
+                                                    questionText.includes('বিধানসভা কেন্দ্র') ||
+                                                    (questionText.includes('registered') && questionText.includes('voter') && questionText.includes('assembly'));
+                  
+                  if (isRegisteredVoterQuestion) {
+                    // Get AC name: for CAPI use selectedAC, for CATI use acFromSessionData
+                    const acName = selectedAC || acFromSessionData;
+                    if (acName) {
+                      return <Text style={{ color: '#2563eb', fontWeight: '600', marginLeft: 8 }}>: {acName}</Text>;
+                    }
+                    return null;
+                  }
+                  return null;
+                })()}
                 {currentQuestion.required && <Text style={styles.requiredAsterisk}> *</Text>}
                 {currentQuestion.type === 'multiple_choice' && currentQuestion.settings?.allowMultiple && (
                   <Text style={styles.multipleSelectionTag}> Multiple</Text>
@@ -4301,12 +4632,24 @@ export default function InterviewInterface({ navigation, route }: any) {
           Previous
         </Button>
         
-        {(currentQuestionIndex === visibleQuestions.length - 1 || isConsentDisagreed) ? (
+        {(currentQuestionIndex === visibleQuestions.length - 1 || shouldShowSubmitForCallStatus || shouldShowAbandonForConsent || (isConsentDisagreed && currentQuestion?.id === 'consent-form')) ? (
           <Button
             mode="contained"
-            onPress={completeInterview}
+            onPress={() => {
+              // If call status is not connected, abandon instead of complete
+              if (shouldShowSubmitForCallStatus && callStatusResponse) {
+                abandonInterview();
+              } 
+              // If consent form is "No", abandon instead of complete
+              else if ((shouldShowAbandonForConsent || (isConsentDisagreed && currentQuestion?.id === 'consent-form')) && isConsentDisagreed) {
+                abandonInterview('consent_refused');
+              } 
+              else {
+                completeInterview();
+              }
+            }}
             style={[
-              styles.completeButton,
+              (shouldShowSubmitForCallStatus || shouldShowAbandonForConsent || (isConsentDisagreed && currentQuestion?.id === 'consent-form')) ? styles.abandonButton : styles.completeButton,
               (targetAudienceErrors.size > 0 || 
                (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
                 !isRecording && audioPermission !== false)) && styles.disabledButton
@@ -4316,7 +4659,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                       !isRecording && audioPermission !== false)}
             loading={isLoading}
           >
-            Submit
+            {(shouldShowSubmitForCallStatus || shouldShowAbandonForConsent || (isConsentDisagreed && currentQuestion?.id === 'consent-form')) ? 'Abandon' : 'Submit'}
           </Button>
         ) : (
           <Button
@@ -4335,6 +4678,8 @@ export default function InterviewInterface({ navigation, route }: any) {
                  (currentQuestion as any)?.isPollingStationSelection ||
                  (currentQuestion.text && currentQuestion.text.toLowerCase().includes('select polling station'))) &&
                 (!selectedPollingStation.groupName || !selectedPollingStation.stationName)) ||
+               // Check if call status is not connected in CATI mode
+               (isCatiMode && currentQuestion && currentQuestion.id === 'call-status' && callStatusResponse !== 'call_connected') ||
                (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
                 !isRecording && audioPermission !== false)) && styles.disabledButton
             ]}
@@ -4352,6 +4697,8 @@ export default function InterviewInterface({ navigation, route }: any) {
                        (currentQuestion as any)?.isPollingStationSelection ||
                        (currentQuestion.text && currentQuestion.text.toLowerCase().includes('select polling station'))) &&
                       (!selectedPollingStation.groupName || !selectedPollingStation.stationName)) ||
+                     // Check if call status is not connected in CATI mode
+                     (isCatiMode && currentQuestion && currentQuestion.id === 'call-status' && callStatusResponse !== 'call_connected') ||
                      (((survey.mode === 'capi') || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && 
                       !isRecording && audioPermission !== false)}
           >
@@ -4360,18 +4707,68 @@ export default function InterviewInterface({ navigation, route }: any) {
         )}
       </View>
 
-      {/* Abandon/Exit Confirmation Modal (CAPI) */}
-      {showAbandonConfirm && (
+      {/* Abandon Modal (CAPI) */}
+      {showAbandonConfirm && !isCatiMode && (
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Leave Interview</Text>
-            <Text style={styles.modalText}>
-              Are you sure you want to leave this interview? All progress will be lost.
+          <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
+            <Text style={styles.modalTitle}>Abandon Interview</Text>
+            <Text style={styles.modalLabel}>
+              Please select a reason for abandoning this interview:
             </Text>
+            
+            <View style={styles.radioGroup}>
+              <RadioButton.Group
+                onValueChange={setAbandonReason}
+                value={abandonReason}
+              >
+                <RadioButton.Item label="Respondent Not Available" value="respondent_not_available" />
+                <RadioButton.Item label="Respondent Refused" value="respondent_refused" />
+                <RadioButton.Item label="Location Issue" value="location_issue" />
+                <RadioButton.Item label="Technical Issue" value="technical_issue" />
+                <RadioButton.Item label="Language Barrier" value="language_barrier" />
+                <RadioButton.Item label="Respondent Busy" value="respondent_busy" />
+                <RadioButton.Item label="Other" value="other" />
+              </RadioButton.Group>
+            </View>
+            
+            {abandonReason === 'other' && (
+              <View style={styles.datePickerContainer}>
+                <Text style={styles.modalLabel}>Please specify:</Text>
+                <TextInput
+                  mode="outlined"
+                  multiline
+                  numberOfLines={3}
+                  placeholder="Enter custom reason..."
+                  value={abandonNotes}
+                  onChangeText={setAbandonNotes}
+                  style={styles.notesInput}
+                />
+              </View>
+            )}
+            
+            {abandonReason !== 'other' && (
+              <View>
+                <Text style={styles.modalLabel}>Additional Notes (Optional):</Text>
+                <TextInput
+                  mode="outlined"
+                  multiline
+                  numberOfLines={3}
+                  placeholder="Add any additional notes..."
+                  value={abandonNotes}
+                  onChangeText={setAbandonNotes}
+                  style={styles.notesInput}
+                />
+              </View>
+            )}
+            
             <View style={styles.modalButtons}>
               <Button
                 mode="outlined"
-                onPress={() => setShowAbandonConfirm(false)}
+                onPress={() => {
+                  setShowAbandonConfirm(false);
+                  setAbandonReason('');
+                  setAbandonNotes('');
+                }}
                 style={styles.modalButton}
               >
                 Cancel
@@ -4379,15 +4776,24 @@ export default function InterviewInterface({ navigation, route }: any) {
               <Button
                 mode="contained"
                 onPress={() => {
+                  if (!abandonReason) {
+                    showSnackbar('Please select a reason for abandoning');
+                    return;
+                  }
+                  if (abandonReason === 'other' && !abandonNotes.trim()) {
+                    showSnackbar('Please specify the custom reason');
+                    return;
+                  }
                   setShowAbandonConfirm(false);
                   abandonInterview();
                 }}
+                disabled={!abandonReason || (abandonReason === 'other' && !abandonNotes.trim())}
                 style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
               >
-                Leave
+                Submit
               </Button>
             </View>
-          </View>
+          </ScrollView>
         </View>
       )}
 
@@ -5008,6 +5414,10 @@ const styles = StyleSheet.create({
   completeButton: {
     flex: 0.45,
     backgroundColor: '#10b981',
+  },
+  abandonButton: {
+    flex: 0.45,
+    backgroundColor: '#ef4444',
   },
   modalOverlay: {
     position: 'absolute',

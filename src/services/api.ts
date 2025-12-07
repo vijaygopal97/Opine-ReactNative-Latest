@@ -616,7 +616,7 @@ class ApiService {
     }
   }
 
-  async abandonCatiInterview(queueId: string, reason?: string, notes?: string, callLaterDate?: string) {
+  async abandonCatiInterview(queueId: string, reason?: string, notes?: string, callLaterDate?: string, callStatus?: string) {
     try {
       const headers = await this.getHeaders();
       const response = await axios.post(
@@ -624,7 +624,8 @@ class ApiService {
         {
           reason,
           notes,
-          callLaterDate
+          callLaterDate,
+          callStatus // Pass call status for stats tracking
         },
         { headers }
       );
