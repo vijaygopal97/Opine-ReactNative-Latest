@@ -39,8 +39,8 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
     const trimmed = value.trim();
     if (!trimmed) return false;
     
-    // Check if it's a 6-digit memberId
-    const isMemberId = /^\d{6}$/.test(trimmed);
+    // Check if it's a memberId (any digits)
+    const isMemberId = /^\d+$/.test(trimmed);
     if (isMemberId) return true;
     
     // Check if it's a valid email
@@ -56,7 +56,7 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
 
     // Validate identifier format
     if (!validateIdentifier(identifier.trim())) {
-      showSnackbar('Please provide a valid email address or 6-digit Member ID');
+      showSnackbar('Please provide a valid email address or Member ID');
       return;
     }
 
@@ -140,7 +140,7 @@ export default function LoginScreen({ navigation, onLogin }: LoginScreenProps) {
                   autoCorrect={false}
                   style={styles.input}
                   left={<TextInput.Icon icon="email" />}
-                  placeholder="Enter email or 6-digit Member ID"
+                  placeholder="Enter email or Member ID"
                 />
                 
                 <TextInput
