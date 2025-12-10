@@ -154,8 +154,8 @@ export default function App() {
       
       // Store the authentication data (API service already stored it, but ensure it's here too)
       try {
-        await AsyncStorage.setItem('authToken', token);
-        await AsyncStorage.setItem('userData', JSON.stringify(userData));
+      await AsyncStorage.setItem('authToken', token);
+      await AsyncStorage.setItem('userData', JSON.stringify(userData));
         console.log('✅ Authentication data stored in App.tsx');
       } catch (storageError) {
         console.error('⚠️ Error storing auth data in App.tsx (non-critical):', storageError);
@@ -194,8 +194,8 @@ export default function App() {
       console.error('❌ Error in handleLogin:', error);
       // Even if there's an error, try to set user as authenticated
       try {
-        setUser(userData);
-        setIsAuthenticated(true);
+      setUser(userData);
+      setIsAuthenticated(true);
         console.log('✅ User authenticated despite error');
       } catch (stateError) {
         console.error('❌ Critical error: Could not authenticate user:', stateError);

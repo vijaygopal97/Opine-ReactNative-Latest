@@ -223,7 +223,7 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
         setIsOffline(true);
       } catch (fallbackError) {
         console.error('Error loading from offline storage:', fallbackError);
-        showSnackbar('Failed to load dashboard data');
+      showSnackbar('Failed to load dashboard data');
       }
     } finally {
       setIsLoading(false);
@@ -511,72 +511,72 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
 
         {/* Recent Interviews - Only show in online mode */}
         {!isOffline && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Interviews</Text>
-              <Button
-                mode="text"
-                onPress={() => navigation.navigate('MyInterviews')}
-                textColor="#001D48"
-                compact
-              >
-                View All
-              </Button>
-            </View>
-            
-            {myInterviews.length > 0 ? (
-              myInterviews.slice(0, 3).map((interview) => (
-                <Card key={interview._id} style={styles.interviewCard}>
-                  <Card.Content>
-                    <View style={styles.interviewHeader}>
-                      <Text style={styles.interviewTitle}>{interview.survey?.surveyName || 'Unknown Survey'}</Text>
-                      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(interview.status) }]}>
-                        <Text style={styles.statusText}>{getStatusText(interview.status)}</Text>
-                      </View>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Interviews</Text>
+            <Button
+              mode="text"
+              onPress={() => navigation.navigate('MyInterviews')}
+              textColor="#001D48"
+              compact
+            >
+              View All
+            </Button>
+          </View>
+          
+          {myInterviews.length > 0 ? (
+            myInterviews.slice(0, 3).map((interview) => (
+              <Card key={interview._id} style={styles.interviewCard}>
+                <Card.Content>
+                  <View style={styles.interviewHeader}>
+                    <Text style={styles.interviewTitle}>{interview.survey?.surveyName || 'Unknown Survey'}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(interview.status) }]}>
+                      <Text style={styles.statusText}>{getStatusText(interview.status)}</Text>
                     </View>
-                    <View style={styles.interviewMeta}>
-                      <View style={styles.metaItem}>
-                        <Text style={styles.metaLabel}>Started</Text>
-                        <Text style={styles.metaValue}>
-                          {formatDate(interview.startTime || interview.startedAt || interview.createdAt)}
-                        </Text>
-                      </View>
-                      <View style={styles.metaItem}>
-                        <Text style={styles.metaLabel}>Duration</Text>
-                        <Text style={styles.metaValue}>
-                          {interview.totalTimeSpent ? `${Math.floor(interview.totalTimeSpent / 60)} min` : 'N/A'}
-                        </Text>
-                      </View>
-                      <View style={styles.metaItem}>
-                        <Text style={styles.metaLabel}>Progress</Text>
-                        <Text style={styles.metaValue}>
-                          {interview.completionPercentage ? `${interview.completionPercentage}%` : 'N/A'}
-                        </Text>
-                      </View>
-                      <View style={styles.metaItem}>
-                        <Text style={styles.metaLabel}>Status</Text>
-                        <Text style={styles.metaValue}>
-                          {interview.status ? interview.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'N/A'}
-                        </Text>
-                      </View>
-                    </View>
-                    {(interview.endTime || interview.completedAt) && (
-                      <Text style={styles.interviewDate}>
-                        Completed: {formatDate(interview.endTime || interview.completedAt)}
+                  </View>
+                  <View style={styles.interviewMeta}>
+                    <View style={styles.metaItem}>
+                      <Text style={styles.metaLabel}>Started</Text>
+                      <Text style={styles.metaValue}>
+                        {formatDate(interview.startTime || interview.startedAt || interview.createdAt)}
                       </Text>
-                    )}
-                  </Card.Content>
-                </Card>
-              ))
-            ) : (
-              <Card style={styles.emptyCard}>
-                <Card.Content style={styles.emptyContent}>
-                  <Text style={styles.emptyText}>No interviews yet</Text>
-                  <Text style={styles.emptySubtext}>Start your first interview from available surveys</Text>
+                    </View>
+                    <View style={styles.metaItem}>
+                      <Text style={styles.metaLabel}>Duration</Text>
+                      <Text style={styles.metaValue}>
+                        {interview.totalTimeSpent ? `${Math.floor(interview.totalTimeSpent / 60)} min` : 'N/A'}
+                      </Text>
+                    </View>
+                    <View style={styles.metaItem}>
+                      <Text style={styles.metaLabel}>Progress</Text>
+                      <Text style={styles.metaValue}>
+                        {interview.completionPercentage ? `${interview.completionPercentage}%` : 'N/A'}
+                      </Text>
+                    </View>
+                    <View style={styles.metaItem}>
+                      <Text style={styles.metaLabel}>Status</Text>
+                      <Text style={styles.metaValue}>
+                        {interview.status ? interview.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'N/A'}
+                      </Text>
+                    </View>
+                  </View>
+                  {(interview.endTime || interview.completedAt) && (
+                    <Text style={styles.interviewDate}>
+                      Completed: {formatDate(interview.endTime || interview.completedAt)}
+                    </Text>
+                  )}
                 </Card.Content>
               </Card>
-            )}
-          </View>
+            ))
+          ) : (
+            <Card style={styles.emptyCard}>
+              <Card.Content style={styles.emptyContent}>
+                <Text style={styles.emptyText}>No interviews yet</Text>
+                <Text style={styles.emptySubtext}>Start your first interview from available surveys</Text>
+              </Card.Content>
+            </Card>
+          )}
+        </View>
         )}
         
         {/* Offline Interviews Section */}

@@ -67,14 +67,14 @@ export default function AvailableSurveys({ navigation }: any) {
       
       if (isOnline) {
         // Online - fetch from server
-        const result = await apiService.getAvailableSurveys();
-        
-        if (result.success) {
+      const result = await apiService.getAvailableSurveys();
+      
+      if (result.success) {
           const surveys = result.surveys || [];
           setSurveys(surveys);
           // Save to offline storage AND download all dependent data immediately
           await offlineStorage.saveSurveys(surveys, true);
-          // Apply client-side filtering
+        // Apply client-side filtering
           applyFilters(surveys);
         } else {
           // If API fails, try loading from offline storage
@@ -110,7 +110,7 @@ export default function AvailableSurveys({ navigation }: any) {
           showSnackbar('Failed to load surveys. Please try again.');
         }
       } catch (offlineError) {
-        showSnackbar('Failed to load surveys. Please try again.');
+      showSnackbar('Failed to load surveys. Please try again.');
       }
     } finally {
       setIsLoading(false);

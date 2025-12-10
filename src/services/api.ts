@@ -753,7 +753,8 @@ class ApiService {
   }
 
   // Get last CATI set number for a survey (to alternate sets)
-  async getLastCatiSetNumber(surveyId: string) {
+  // CRITICAL: Always fetch from API to ensure proper set rotation - do NOT use cached data
+  async getLastCatiSetNumber(surveyId: string, forceRefresh: boolean = true) {
     try {
       if (!surveyId) {
         return {
@@ -763,73 +764,57 @@ class ApiService {
         };
       }
 
-      // Check offline cache first (lazy import)
-      const cacheForRead = await this.getOfflineCache();
-      let cachedData = null;
-      if (cacheForRead) {
-        try {
-          cachedData = await cacheForRead.getCatiSetNumber(surveyId);
-        } catch (cacheError) {
-          // Cache read failed, continue
-        }
-      }
-      if (cachedData) {
-        console.log('📦 Using cached CATI set number for survey:', surveyId);
-        return { success: true, data: cachedData };
-      }
-
-      // Check if online
+      // Check if online - CATI requires internet connection
       const isOnline = await this.isOnline();
       if (!isOnline) {
-        console.log('📴 Offline - no cached CATI set number for survey:', surveyId);
-        // Return default for offline (Set 1)
+        console.log('📴 Offline - CATI set number requires internet connection');
+        // Return error for offline - CATI interviews require internet
         return {
-          success: true,
-          data: { nextSetNumber: 1 }
+          success: false,
+          message: 'Internet connection required for CATI set number',
+          error: 'Offline mode'
         };
       }
 
-      // Fetch from API
+      // CRITICAL: Always fetch from API to ensure proper set rotation
+      // Do NOT use cached data for CATI set numbers as rotation depends on latest completed interviews
+      console.log('🔄 Fetching latest CATI set number from API for survey:', surveyId);
       const headers = await this.getHeaders();
       const response = await axios.get(`${this.baseURL}/api/survey-responses/survey/${surveyId}/last-cati-set`, { headers });
       
-      // Cache the data
+      // Update cache with latest data (for reference, but we won't use it for CATI)
       const cacheForSave = await this.getOfflineCache();
       if (cacheForSave && response.data.success && response.data.data) {
         try {
           await cacheForSave.saveCatiSetNumber(surveyId, response.data.data);
+          console.log('✅ Updated CATI set number cache:', response.data.data);
         } catch (cacheError) {
           // Cache save failed, continue
+          console.warn('⚠️ Failed to update CATI set number cache:', cacheError);
         }
       }
       
       return response.data;
     } catch (error: any) {
-      // Silently handle 404 or other errors - return error response for frontend to handle
-      if (error.response && error.response.data) {
-        // Try cache as fallback
-        const cacheForFallback1 = await this.getOfflineCache();
-        if (cacheForFallback1) {
-          try {
-            const cachedData = await cacheForFallback1.getCatiSetNumber(surveyId);
-            if (cachedData) {
-              console.log('📦 Using cached CATI set number as fallback for survey:', surveyId);
-              return { success: true, data: cachedData };
-            }
-          } catch (cacheError) {
-            // Cache not available
-          }
-        }
-        return error.response.data;
+      console.error('❌ Error fetching CATI set number from API:', error);
+      // For CATI, we should not use cached data as fallback - set rotation is critical
+      // Only use cache if it's a network error and we have no other option
+      if (error.response && error.response.status === 404) {
+        // 404 means no previous CATI responses - this is expected for first interview
+        console.log('ℹ️ No previous CATI responses found (404) - will default to Set 1');
+        return {
+          success: true,
+          data: { nextSetNumber: null } // Frontend will default to Set 1
+        };
       }
       
-      // Try cache as fallback
-      const cacheForFallback2 = await this.getOfflineCache();
-      if (cacheForFallback2) {
+      // For other errors, try cache as last resort but log warning
+      const cacheForFallback = await this.getOfflineCache();
+      if (cacheForFallback) {
         try {
-          const cachedData = await cacheForFallback2.getCatiSetNumber(surveyId);
+          const cachedData = await cacheForFallback.getCatiSetNumber(surveyId);
           if (cachedData) {
-            console.log('📦 Using cached CATI set number as fallback for survey:', surveyId);
+            console.warn('⚠️ Using cached CATI set number as fallback (may be stale):', cachedData);
             return { success: true, data: cachedData };
           }
         } catch (cacheError) {
@@ -837,6 +822,12 @@ class ApiService {
         }
       }
       
+      // If we have an error response, return it
+      if (error.response && error.response.data) {
+        return error.response.data;
+      }
+      
+      // Final fallback - return error
       return {
         success: false,
         message: 'Failed to get last CATI set number',

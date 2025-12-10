@@ -36,6 +36,7 @@ import { apiService } from '../services/api';
 import { LocationService } from '../utils/location';
 import { Survey, SurveyResponse } from '../types';
 import { parseTranslation, getMainText } from '../utils/translations';
+import { isGenderQuestion } from '../utils/genderUtils';
 import { offlineStorage, OfflineInterview } from '../services/offlineStorage';
 
 const { width, height } = Dimensions.get('window');
@@ -245,12 +246,19 @@ export default function InterviewInterface({ navigation, route }: any) {
   }, [showStationDropdown]);
 
   // Get all questions from all sections
+  // CRITICAL: For CATI, this depends on selectedSetNumber to filter questions correctly
   const allQuestions = useMemo(() => {
     const questions: any[] = [];
     
     // Early return if survey is not available
     if (!survey) {
       return questions;
+    }
+    
+    // For CATI, log the set number being used for filtering
+    if (isCatiMode) {
+      console.log('🔵 CATI Interview - selectedSetNumber:', selectedSetNumber);
+      console.log('🔵 CATI Interview - survey._id:', survey._id);
     }
     
     // Removed excessive logging - survey data debug
@@ -555,8 +563,15 @@ export default function InterviewInterface({ navigation, route }: any) {
     // console.log('🔍 Total questions processed:', questions.length);
     // console.log('🔍 Questions array:', questions.map(q => ({ id: q.id, text: q.text, type: q.type })));
     
+    // For CATI, log which questions are being included based on set number
+    if (isCatiMode && selectedSetNumber !== null) {
+      const setQuestions = questions.filter((q: any) => q.setsForThisQuestion && q.setNumber === selectedSetNumber);
+      const nonSetQuestions = questions.filter((q: any) => !q.setsForThisQuestion);
+      console.log(`🔵 CATI Questions filtered - Set ${selectedSetNumber} questions: ${setQuestions.length}, Non-set questions: ${nonSetQuestions.length}, Total: ${questions.length}`);
+    }
+    
     return questions;
-  }, [survey.sections, survey.questions, requiresACSelection, assignedACs, selectedAC, availableGroups, availablePollingStations, selectedPollingStation.groupName, selectedPollingStation.stationName, interviewerFirstName, isCatiMode, selectedSetNumber]);
+  }, [survey?.sections, survey?.questions, requiresACSelection, assignedACs, selectedAC, availableGroups, availablePollingStations, selectedPollingStation.groupName, selectedPollingStation.stationName, interviewerFirstName, isCatiMode, selectedSetNumber]);
   
   // Check consent form response
   const consentResponse = responses['consent-form'];
@@ -569,6 +584,11 @@ export default function InterviewInterface({ navigation, route }: any) {
   // If consent is "No" AND we're on the consent form question, show Abandon button (similar to call status)
   // Show Abandon button whenever consent is disagreed (similar to how call status works)
   const shouldShowAbandonForConsent = isConsentDisagreed && currentQuestion?.id === 'consent-form';
+  
+  // REMOVED: Registered voter question abandon logic
+  // The condition logic on the backend will handle "No" responses appropriately
+  // Users can proceed to next question normally, and backend conditions will skip/handle questions as needed
+  const shouldShowAbandonForVoter = false;
   
   // Debug logging
   console.log('🔍 Consent check:', {
@@ -840,15 +860,23 @@ export default function InterviewInterface({ navigation, route }: any) {
           return setArray.length > 0 ? setArray[0] : null; // First set (usually Set 1)
         };
         
+        console.log('🔄 Fetching CATI set number for survey:', survey._id);
         const response = await apiService.getLastCatiSetNumber(survey._id);
+        console.log('🔄 CATI set number API response:', JSON.stringify(response, null, 2));
         
         // Handle response - if API fails or returns no data, default to Set 1
         if (response && response.success && response.data) {
           const nextSetNumber = response.data.nextSetNumber;
+          console.log('🔄 Received nextSetNumber from API:', nextSetNumber);
           if (nextSetNumber !== null && nextSetNumber !== undefined) {
+            console.log('✅ Setting selectedSetNumber to:', nextSetNumber);
             setSelectedSetNumber(nextSetNumber);
             return; // Success, exit early
+          } else {
+            console.warn('⚠️ nextSetNumber is null/undefined, will use default Set 1');
           }
+        } else {
+          console.warn('⚠️ API response not successful or no data:', response);
         }
         
         // Fallback: default to Set 1 (first available set)
@@ -1875,6 +1903,9 @@ export default function InterviewInterface({ navigation, route }: any) {
       }
     }
     
+    // REMOVED: Registered voter question blocking logic
+    // Users can proceed to next question normally - backend condition logic will handle "No" responses appropriately
+    
     // Check geofencing error for polling station questions (only if booster is not enabled)
     if (geofencingError && (currentQuestion as any)?.isPollingStationSelection && !locationControlBooster) {
       showSnackbar(geofencingError);
@@ -2023,15 +2054,21 @@ export default function InterviewInterface({ navigation, route }: any) {
 
   const abandonInterview = async (reasonOverride: string | null = null) => {
     try {
+      // If reasonOverride is provided (e.g., 'consent_refused', 'not_voter'), skip modal and use it directly
+      // This handles cases where we know the reason and don't need user input
+      const shouldSkipModal = reasonOverride === 'consent_refused' || reasonOverride === 'not_voter';
+      
       if (isCatiMode && catiQueueId) {
         // CATI mode - use CATI abandon endpoint
         // Check if this is consent refusal
         const consentResponse = responses['consent-form'];
-        const isConsentRefused = consentResponse === '2' || consentResponse === 2;
+        const isConsentRefused = consentResponse === '2' || consentResponse === 2 || reasonOverride === 'consent_refused';
         
-        // If reasonOverride is provided (e.g., 'consent_refused'), use it
+        // If reasonOverride is provided (e.g., 'consent_refused', 'not_voter'), use it
         const reasonToSend = reasonOverride || (isConsentRefused ? 'consent_refused' : (callStatus === 'failed' ? (abandonReason || null) : abandonReason));
-        const notesToSend = reasonOverride === 'consent_refused' ? 'Consent form: No' : (abandonNotes && abandonNotes.trim() ? abandonNotes : undefined);
+        const notesToSend = reasonOverride === 'consent_refused' ? 'Consent form: No' : 
+                           reasonOverride === 'not_voter' ? 'Not a registered voter in this assembly constituency' :
+                           (abandonNotes && abandonNotes.trim() ? abandonNotes : undefined);
         const dateToSend = (abandonReason === 'call_later' && callLaterDate && callLaterDate.trim()) ? callLaterDate : undefined;
         
         // Get call status for stats (if call was connected but consent refused)
@@ -2047,7 +2084,10 @@ export default function InterviewInterface({ navigation, route }: any) {
         );
         
         if (result.success) {
-          showSnackbar(isConsentRefused ? 'Interview abandoned. Consent refusal recorded for reporting.' : 'Interview abandoned');
+          const message = isConsentRefused ? 'Interview abandoned. Consent refusal recorded for reporting.' :
+                         reasonOverride === 'not_voter' ? 'Interview abandoned. Not a registered voter.' :
+                         'Interview abandoned';
+          showSnackbar(message);
           navigation.navigate('Dashboard');
         } else {
           // CATI interviews require internet - don't save offline
@@ -2130,7 +2170,11 @@ export default function InterviewInterface({ navigation, route }: any) {
             });
           });
           
-          const finalAbandonReason = abandonReason === 'other' ? abandonNotes.trim() : abandonReason;
+          // Use reasonOverride if provided, otherwise use abandonReason state
+          const finalAbandonReason = reasonOverride || (abandonReason === 'other' ? abandonNotes.trim() : abandonReason);
+          const finalAbandonNotes: string | undefined = reasonOverride === 'not_voter' ? 'Not a registered voter in this assembly constituency' :
+                                   reasonOverride === 'consent_refused' ? 'Consent form: No' :
+                                   (abandonReason === 'other' ? abandonNotes : undefined);
           
           try {
             await saveInterviewOffline({
@@ -2138,7 +2182,7 @@ export default function InterviewInterface({ navigation, route }: any) {
               finalResponses,
               isCompleted: false,
               abandonReason: finalAbandonReason,
-              abandonNotes: abandonReason === 'other' ? abandonNotes : undefined,
+              abandonNotes: finalAbandonNotes,
             });
             
             Alert.alert(
@@ -2245,8 +2289,13 @@ export default function InterviewInterface({ navigation, route }: any) {
             });
           });
           
-          // Prepare metadata with abandonment reason
-          const finalAbandonReason = abandonReason === 'other' ? abandonNotes.trim() : abandonReason;
+          // Use reasonOverride if provided, otherwise use abandonReason state
+          // This handles cases like 'consent_refused' and 'not_voter' where we know the reason
+          const finalAbandonReason = reasonOverride || (abandonReason === 'other' ? abandonNotes.trim() : abandonReason);
+          const finalAbandonNotes: string | undefined = reasonOverride === 'not_voter' ? 'Not a registered voter in this assembly constituency' :
+                                   reasonOverride === 'consent_refused' ? 'Consent form: No' :
+                                   (abandonReason === 'other' ? abandonNotes : undefined);
+          
           const metadata = {
             selectedAC: selectedAC || null,
             selectedPollingStation: selectedPollingStation || null,
@@ -2260,7 +2309,7 @@ export default function InterviewInterface({ navigation, route }: any) {
             },
             setNumber: selectedSetNumber || null,
             abandonedReason: finalAbandonReason,
-            abandonmentNotes: abandonReason !== 'other' ? abandonNotes : null
+            abandonmentNotes: finalAbandonNotes || undefined
           };
           
           try {
@@ -2287,7 +2336,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                   finalResponses,
                   isCompleted: false,
                   abandonReason: finalAbandonReason,
-                  abandonNotes: abandonReason === 'other' ? abandonNotes : undefined,
+                  abandonNotes: finalAbandonNotes,
                 });
                 
                 Alert.alert(
@@ -2325,13 +2374,17 @@ export default function InterviewInterface({ navigation, route }: any) {
           if (isNetworkError && !isCatiMode) {
             // Save offline (CAPI only)
             try {
-              const finalAbandonReason = abandonReason === 'other' ? abandonNotes.trim() : abandonReason;
+              // Use reasonOverride if provided, otherwise use abandonReason state
+              const finalAbandonReason = reasonOverride || (abandonReason === 'other' ? abandonNotes.trim() : abandonReason);
+              const finalAbandonNotes = reasonOverride === 'not_voter' ? 'Not a registered voter in this assembly constituency' :
+                                       reasonOverride === 'consent_refused' ? 'Consent form: No' :
+                                       (abandonReason === 'other' ? abandonNotes : undefined);
               await saveInterviewOffline({
                 responses,
                 finalResponses: undefined, // Will be built from responses if needed
                 isCompleted: false,
                 abandonReason: finalAbandonReason,
-                abandonNotes: abandonReason === 'other' ? abandonNotes : undefined,
+                abandonNotes: finalAbandonNotes,
               });
               
               Alert.alert(
@@ -3571,11 +3624,16 @@ export default function InterviewInterface({ navigation, route }: any) {
         const answeredCount = finalResponses.filter((r: any) => hasResponseContent(r.response)).length;
         const totalCount = allQuestions.length;
         
-        // CRITICAL: Ensure setNumber is set before sending to backend
-        // If selectedSetNumber is still null, try to determine it from the questions shown
+        // CRITICAL: Use selectedSetNumber directly - it was fetched from API when interview started
+        // This ensures we use the correct set that was actually shown to the user
         let finalSetNumber = selectedSetNumber;
+        
+        console.log('🔵 Completing CATI interview - selectedSetNumber:', selectedSetNumber);
+        console.log('🔵 Completing CATI interview - finalSetNumber:', finalSetNumber);
+        
         if (finalSetNumber === null && isCatiMode && survey) {
-          // Try to determine set number from questions that were shown
+          console.warn('⚠️ selectedSetNumber is null, trying to determine from answered questions');
+          // Fallback: Try to determine set number from questions that were answered
           const setNumbers = new Set<number>();
           survey.sections?.forEach((section: any) => {
             section.questions?.forEach((question: any) => {
@@ -3591,6 +3649,9 @@ export default function InterviewInterface({ navigation, route }: any) {
           const setArray = Array.from(setNumbers).sort((a, b) => a - b);
           if (setArray.length > 0) {
             finalSetNumber = setArray[0]; // Use the first set that was answered
+            console.warn('⚠️ Determined setNumber from answered questions:', finalSetNumber);
+          } else {
+            console.error('❌ Could not determine setNumber from answered questions');
           }
         }
         

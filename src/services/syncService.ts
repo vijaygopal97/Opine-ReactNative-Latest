@@ -158,29 +158,69 @@ class SyncService {
     const finalResponses = this.buildFinalResponses(interview);
 
     // Calculate duration from startTime and endTime if available
-    // Prefer calculated duration over stored duration for accuracy
+    // CRITICAL: Prefer stored duration if it's valid, otherwise calculate from timestamps
+    // The stored duration is more reliable as it was calculated at the time of saving
     let totalTimeSpent = interview.duration || 0;
-    if (interview.startTime && interview.endTime) {
+    
+    console.log('🔍 Duration calculation - interview.duration:', interview.duration);
+    console.log('🔍 Duration calculation - interview.startTime:', interview.startTime);
+    console.log('🔍 Duration calculation - interview.endTime:', interview.endTime);
+    
+    // First, check if stored duration is valid (greater than 0)
+    if (totalTimeSpent > 0) {
+      console.log('✅ Using stored duration:', totalTimeSpent, 'seconds');
+    } else if (interview.startTime && interview.endTime) {
+      // If stored duration is invalid, calculate from timestamps
       try {
         const start = new Date(interview.startTime);
         const end = new Date(interview.endTime);
-        const calculatedDuration = Math.floor((end.getTime() - start.getTime()) / 1000);
-        // Use calculated duration if it's valid and positive
-        if (calculatedDuration > 0) {
-          totalTimeSpent = calculatedDuration;
-          console.log('✅ Calculated duration from timestamps:', totalTimeSpent, 'seconds');
+        
+        console.log('🔍 Parsed start time:', start.toISOString(), 'timestamp:', start.getTime());
+        console.log('🔍 Parsed end time:', end.toISOString(), 'timestamp:', end.getTime());
+        
+        // Check if dates are valid
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+          console.error('❌ Invalid date values - start:', interview.startTime, 'end:', interview.endTime);
+          console.log('⚠️ Using stored duration as fallback:', interview.duration);
         } else {
-          console.log('⚠️ Calculated duration is invalid, using stored duration:', interview.duration);
+          const timeDiff = end.getTime() - start.getTime();
+          const calculatedDuration = Math.floor(timeDiff / 1000);
+          
+          console.log('🔍 Time difference (ms):', timeDiff);
+          console.log('🔍 Calculated duration (seconds):', calculatedDuration);
+          
+          // Use calculated duration if it's valid and positive
+          if (calculatedDuration > 0) {
+            totalTimeSpent = calculatedDuration;
+            console.log('✅ Calculated duration from timestamps:', totalTimeSpent, 'seconds');
+          } else {
+            console.warn('⚠️ Calculated duration is invalid (<= 0), using stored duration:', interview.duration);
+            // If calculated is invalid but stored is also invalid, use a minimum of 1 second
+            if (totalTimeSpent <= 0) {
+              totalTimeSpent = 1;
+              console.warn('⚠️ Both calculated and stored duration invalid, using minimum 1 second');
+            }
+          }
         }
       } catch (durationError) {
-        console.error('Error calculating duration:', durationError);
-        console.log('Using stored duration as fallback:', interview.duration);
+        console.error('❌ Error calculating duration:', durationError);
+        console.log('⚠️ Using stored duration as fallback:', interview.duration);
+        // If stored duration is also invalid, use minimum
+        if (totalTimeSpent <= 0) {
+          totalTimeSpent = 1;
+          console.warn('⚠️ Using minimum 1 second as last resort');
+        }
       }
     } else {
-      console.log('⚠️ No timestamps available, using stored duration:', interview.duration);
+      console.warn('⚠️ No timestamps available, using stored duration:', interview.duration);
+      // If stored duration is also invalid, use minimum
+      if (totalTimeSpent <= 0) {
+        totalTimeSpent = 1;
+        console.warn('⚠️ No valid duration found, using minimum 1 second');
+      }
     }
     
-    console.log('📊 Syncing interview with duration:', totalTimeSpent, 'seconds');
+    console.log('📊 Final duration for sync:', totalTimeSpent, 'seconds (', Math.floor(totalTimeSpent / 60), 'minutes)');
 
     // Extract interviewer ID and supervisor ID from responses (for survey 68fd1915d41841da463f0d46)
     const isTargetSurvey = interview.survey && (interview.survey._id === '68fd1915d41841da463f0d46' || interview.survey.id === '68fd1915d41841da463f0d46');
@@ -468,3 +508,4 @@ class SyncService {
 }
 
 export const syncService = new SyncService();
+
