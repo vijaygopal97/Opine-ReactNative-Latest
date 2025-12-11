@@ -23,7 +23,7 @@ export class LocationService {
     }
   }
 
-  static async getCurrentLocation(): Promise<LocationResult> {
+  static async getCurrentLocation(skipOnlineGeocoding: boolean = false): Promise<LocationResult> {
     try {
       // Request permissions first
       const hasPermission = await this.requestPermissions();
@@ -37,7 +37,7 @@ export class LocationService {
           accuracy: Location.Accuracy.High,
         });
 
-        const address = await this.reverseGeocode(location.coords.latitude, location.coords.longitude);
+        const address = await this.reverseGeocode(location.coords.latitude, location.coords.longitude, skipOnlineGeocoding);
 
         return {
           latitude: location.coords.latitude,
@@ -58,7 +58,7 @@ export class LocationService {
           accuracy: Location.Accuracy.Balanced,
         });
 
-        const address = await this.reverseGeocode(location.coords.latitude, location.coords.longitude);
+        const address = await this.reverseGeocode(location.coords.latitude, location.coords.longitude, skipOnlineGeocoding);
 
         return {
           latitude: location.coords.latitude,
@@ -78,9 +78,9 @@ export class LocationService {
     }
   }
 
-  static async reverseGeocode(latitude: number, longitude: number) {
+  static async reverseGeocode(latitude: number, longitude: number, skipOnlineGeocoding: boolean = false) {
     try {
-      // Use Expo's built-in reverse geocoding
+      // Use Expo's built-in reverse geocoding (works offline on device)
       const addresses = await Location.reverseGeocodeAsync({
         latitude,
         longitude,
@@ -97,10 +97,34 @@ export class LocationService {
           postalCode: address.postalCode || '',
         };
       } else {
-        // Fallback to free Nominatim API
+        // If skipOnlineGeocoding is true (offline mode), return coordinates only
+        if (skipOnlineGeocoding) {
+          console.log('📴 Offline mode - skipping online geocoding, returning coordinates only');
+          return {
+            formatted: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+            street: '',
+            city: '',
+            state: '',
+            country: '',
+            postalCode: '',
+          };
+        }
+        // Fallback to free Nominatim API (only if online)
         return await this.reverseGeocodeNominatim(latitude, longitude);
       }
     } catch (error) {
+      // If skipOnlineGeocoding is true (offline mode), return coordinates only
+      if (skipOnlineGeocoding) {
+        console.log('📴 Offline mode - Expo geocoding failed, returning coordinates only');
+        return {
+          formatted: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+          street: '',
+          city: '',
+          state: '',
+          country: '',
+          postalCode: '',
+        };
+      }
       console.warn('Expo reverse geocoding failed, trying Nominatim:', error);
       return await this.reverseGeocodeNominatim(latitude, longitude);
     }
@@ -108,6 +132,30 @@ export class LocationService {
 
   static async reverseGeocodeNominatim(latitude: number, longitude: number) {
     try {
+      // Check if online before making network request
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const testResponse = await fetch('https://www.google.com/favicon.ico', {
+          method: 'HEAD',
+          cache: 'no-cache',
+          mode: 'no-cors',
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (testError) {
+        // Not online, return coordinates only
+        console.log('📴 Offline - skipping Nominatim reverse geocoding');
+        return {
+          formatted: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+          street: '',
+          city: '',
+          state: '',
+          country: '',
+          postalCode: '',
+        };
+      }
+
       const response = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`
       );
@@ -132,6 +180,7 @@ export class LocationService {
       }
     } catch (error) {
       console.error('Nominatim reverse geocoding failed:', error);
+      // Return coordinates only on error (works offline)
       return {
         formatted: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
         street: '',

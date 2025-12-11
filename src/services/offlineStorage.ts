@@ -72,7 +72,8 @@ class OfflineStorageService {
             this.isDownloadingDependentData = true;
             console.log('📥 Downloading all dependent data for surveys...');
             const { offlineDataCache } = await import('./offlineDataCache');
-            await offlineDataCache.downloadDependentDataForSurveys(surveys);
+            // Always include GPS data for geofencing to work offline
+            await offlineDataCache.downloadDependentDataForSurveys(surveys, true);
             console.log('✅ All dependent data downloaded and cached');
           } catch (dependentDataError) {
             console.error('❌ Error downloading dependent data:', dependentDataError);
@@ -390,4 +391,5 @@ class OfflineStorageService {
 }
 
 export const offlineStorage = new OfflineStorageService();
+
 

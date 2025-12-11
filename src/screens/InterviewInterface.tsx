@@ -29,7 +29,7 @@ import {
   Switch,
 } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { apiService } from '../services/api';
@@ -100,6 +100,9 @@ let isStartingRecording = false;
 
 export default function InterviewInterface({ navigation, route }: any) {
   const { survey, responseId, isContinuing, isCatiMode: routeIsCatiMode } = route.params;
+  
+  // Get safe area insets for bottom navigation bar
+  const insets = useSafeAreaInsets();
   
   // Determine if this is CATI mode
   const isCatiMode = routeIsCatiMode !== undefined 
@@ -1214,7 +1217,12 @@ export default function InterviewInterface({ navigation, route }: any) {
           // CAPI mode - get location and start normal interview
           setLocationLoading(true);
           try {
-            const location = await LocationService.getCurrentLocation();
+            // Check if online before attempting reverse geocoding
+            const isOnline = await apiService.isOnline();
+            console.log('📡 Online status for location:', isOnline);
+            
+            // If offline, skip online geocoding (Nominatim) to avoid network errors
+            const location = await LocationService.getCurrentLocation(!isOnline);
             setLocationData(location);
           } catch (locationError) {
             console.error('Error getting location:', locationError);
@@ -1428,6 +1436,7 @@ export default function InterviewInterface({ navigation, route }: any) {
         setLoadingGroups(true);
         // Use survey's acAssignmentState or default to 'West Bengal'
         const state = survey?.acAssignmentState || sessionData?.acAssignmentState || 'West Bengal';
+        console.log('🔍 Fetching groups for AC:', selectedAC, 'in state:', state);
         const response = await apiService.getGroupsByAC(state, selectedAC);
         
         if (response.success) {
@@ -1435,6 +1444,7 @@ export default function InterviewInterface({ navigation, route }: any) {
           // API service returns response.data which is { success: true, data: {...} }
           const responseData = response.data || {};
           const groups = responseData.groups || [];
+          console.log('✅ Successfully fetched', groups.length, 'groups for AC:', selectedAC);
           setAvailableGroups(groups);
           setSelectedPollingStation((prev: any) => ({
             ...prev,
@@ -1448,11 +1458,25 @@ export default function InterviewInterface({ navigation, route }: any) {
           // Clear polling stations when AC changes
           setAvailablePollingStations([]);
         } else {
-          console.error('Failed to fetch groups:', response.message);
+          console.error('❌ Failed to fetch groups:', response.message);
+          console.error('❌ Response:', response);
+          // Show user-friendly error message
+          Alert.alert(
+            'Failed to Load Groups',
+            response.message || 'Unable to load groups for the selected AC. Please check your internet connection or try syncing from the dashboard.',
+            [{ text: 'OK' }]
+          );
           setAvailableGroups([]);
         }
-      } catch (error) {
-        console.error('Error fetching groups:', error);
+      } catch (error: any) {
+        console.error('❌ Error fetching groups:', error);
+        console.error('❌ Error details:', error.message, error.stack);
+        // Show user-friendly error message
+        Alert.alert(
+          'Error Loading Groups',
+          'An error occurred while loading groups. Please check your internet connection or try syncing from the dashboard.',
+          [{ text: 'OK' }]
+        );
         setAvailableGroups([]);
         setAvailablePollingStations([]);
       } finally {
@@ -1509,38 +1533,81 @@ export default function InterviewInterface({ navigation, route }: any) {
         return;
       }
       
-      try {
-        const state = selectedPollingStation.state || survey?.acAssignmentState || sessionData?.acAssignmentState || 'West Bengal';
-        const response = await apiService.getPollingStationGPS(
-          state,
-          selectedPollingStation.acName,
-          selectedPollingStation.groupName,
-          selectedPollingStation.stationName
-        );
-        
-        if (response.success) {
-          setSelectedPollingStation((prev: any) => ({
-            ...prev,
-            gpsLocation: response.data.gps_location,
-            latitude: response.data.latitude,
-            longitude: response.data.longitude
-          }));
-          
-          // Check geofencing if in CAPI mode and locationControlBooster is false
-          if ((survey.mode === 'capi' || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && !locationControlBooster && locationData) {
-            await checkGeofencing(response.data.latitude, response.data.longitude);
-          } else {
-            // Clear geofencing error if booster is enabled OR if not in CAPI mode
-            setGeofencingError(null);
-          }
+      const state = selectedPollingStation.state || survey?.acAssignmentState || sessionData?.acAssignmentState || 'West Bengal';
+      let stationLat: number | null = null;
+      let stationLng: number | null = null;
+      let gpsLocation: string | null = null;
+      
+      // First, try to get GPS from the selected station in availablePollingStations (if already loaded)
+      // Backend returns: { name, gps_location, latitude, longitude }
+      const selectedStation = availablePollingStations.find(
+        (s: any) => (s.stationName || s.name) === selectedPollingStation.stationName
+      );
+      if (selectedStation) {
+        // Check for latitude/longitude in various possible field names
+        const lat = selectedStation.latitude || selectedStation.lat;
+        const lng = selectedStation.longitude || selectedStation.lng || selectedStation.lon;
+        if (lat && lng) {
+          console.log('📍 Using GPS from station list:', lat, lng);
+          stationLat = typeof lat === 'number' ? lat : parseFloat(lat);
+          stationLng = typeof lng === 'number' ? lng : parseFloat(lng);
+          gpsLocation = selectedStation.gps_location || selectedStation.gpsLocation || null;
         }
-      } catch (error) {
-        console.error('Error fetching polling station GPS:', error);
+      }
+      
+      // If not found in station list, try to fetch from API/cache
+      if (!stationLat || !stationLng) {
+        try {
+          const response = await apiService.getPollingStationGPS(
+            state,
+            selectedPollingStation.acName,
+            selectedPollingStation.groupName,
+            selectedPollingStation.stationName
+          );
+          
+          if (response.success && response.data) {
+            console.log('📍 Using GPS from API/cache:', response.data.latitude, response.data.longitude);
+            stationLat = response.data.latitude;
+            stationLng = response.data.longitude;
+            gpsLocation = response.data.gps_location || null;
+          }
+        } catch (error) {
+          console.error('Error fetching polling station GPS:', error);
+          // Continue - we'll try to use GPS from station list if available
+        }
+      }
+      
+      // Update polling station state with GPS if we found it
+      // Validate that coordinates are valid numbers
+      if (stationLat != null && stationLng != null && !isNaN(stationLat) && !isNaN(stationLng)) {
+        setSelectedPollingStation((prev: any) => ({
+          ...prev,
+          gpsLocation: gpsLocation,
+          latitude: stationLat,
+          longitude: stationLng
+        }));
+        
+        // Check geofencing if in CAPI mode and locationControlBooster is enabled (ON)
+        if ((survey.mode === 'capi' || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && locationControlBooster && locationData) {
+          console.log('🔒 Checking geofencing - Current:', locationData.latitude, locationData.longitude, 'Station:', stationLat, stationLng);
+          await checkGeofencing(stationLat, stationLng);
+        } else {
+          // Clear geofencing error if booster is disabled OR if not in CAPI mode
+          setGeofencingError(null);
+        }
+      } else {
+        console.warn('⚠️ Could not get valid GPS coordinates for polling station - geofencing cannot be checked');
+        // If booster is enabled but we can't get GPS, show a warning
+        if ((survey.mode === 'capi' || (survey.mode === 'multi_mode' && survey.assignedMode === 'capi')) && locationControlBooster) {
+          setGeofencingError('GPS coordinates for polling station not available. Please sync survey details or connect to internet.');
+        } else {
+          setGeofencingError(null);
+        }
       }
     };
     
     updateStationGPS();
-  }, [selectedPollingStation.stationName, selectedPollingStation.groupName, selectedPollingStation.acName, locationData, locationControlBooster, survey.mode, survey.assignedMode]);
+  }, [selectedPollingStation.stationName, selectedPollingStation.groupName, selectedPollingStation.acName, locationData, locationControlBooster, survey.mode, survey.assignedMode, availablePollingStations]);
 
   // Check locationControlBooster on mount
   useEffect(() => {
@@ -1550,10 +1617,7 @@ export default function InterviewInterface({ navigation, route }: any) {
         if (userResult.success && userResult.user) {
           const boosterEnabled = userResult.user.preferences?.locationControlBooster || false;
           setLocationControlBooster(boosterEnabled);
-          // Clear geofencing error if booster is enabled
-          if (boosterEnabled) {
-            setGeofencingError(null);
-          }
+          // Note: Geofencing will be checked when polling station is selected if booster is enabled
         }
       } catch (error) {
         console.error('Error checking location control booster:', error);
@@ -1563,12 +1627,8 @@ export default function InterviewInterface({ navigation, route }: any) {
     checkLocationControl();
   }, []);
   
-  // Clear geofencing error whenever booster is enabled
-  useEffect(() => {
-    if (locationControlBooster) {
-      setGeofencingError(null);
-    }
-  }, [locationControlBooster]);
+  // Note: Geofencing will be checked when polling station is selected if booster is enabled
+  // No need to clear error here - let the geofencing check handle it
 
   // Geofencing check function (5KM radius)
   const checkGeofencing = async (stationLat: number, stationLng: number) => {
@@ -1738,12 +1798,8 @@ export default function InterviewInterface({ navigation, route }: any) {
         longitude: null
       }));
       setAvailablePollingStations([]);
-      // Clear geofencing error if booster is enabled
-      if (locationControlBooster) {
-        setGeofencingError(null);
-      } else {
-        setGeofencingError(null); // Clear when group changes
-      }
+      // Clear geofencing error when group changes (will be re-checked when station is selected)
+      setGeofencingError(null);
       // Mark polling station question as answered (group selected)
       setResponses(prev => ({
         ...prev,
@@ -1757,10 +1813,7 @@ export default function InterviewInterface({ navigation, route }: any) {
         ...prev,
         stationName: response
       }));
-      // Clear geofencing error if booster is enabled
-      if (locationControlBooster) {
-        setGeofencingError(null);
-      }
+      // Geofencing will be checked automatically via useEffect when station is selected
       // Mark polling station question as fully answered
       setResponses(prev => ({
         ...prev,
@@ -1906,8 +1959,8 @@ export default function InterviewInterface({ navigation, route }: any) {
     // REMOVED: Registered voter question blocking logic
     // Users can proceed to next question normally - backend condition logic will handle "No" responses appropriately
     
-    // Check geofencing error for polling station questions (only if booster is not enabled)
-    if (geofencingError && (currentQuestion as any)?.isPollingStationSelection && !locationControlBooster) {
+    // Check geofencing error for polling station questions (only if booster is enabled)
+    if (geofencingError && (currentQuestion as any)?.isPollingStationSelection && locationControlBooster) {
       showSnackbar(geofencingError);
       return;
     }
@@ -5186,8 +5239,8 @@ export default function InterviewInterface({ navigation, route }: any) {
               </View>
             )}
 
-            {/* Geofencing Error Display - Only show if booster is not enabled */}
-            {geofencingError && !locationControlBooster && (
+            {/* Geofencing Error Display - Only show if booster is enabled */}
+            {geofencingError && locationControlBooster && (
               <View style={styles.geofencingErrorContainer}>
                 <Text style={styles.geofencingErrorText}>{geofencingError}</Text>
                 <Text style={styles.geofencingErrorHint}>
@@ -5542,7 +5595,7 @@ export default function InterviewInterface({ navigation, route }: any) {
       </ScrollView>
 
       {/* Navigation */}
-      <View style={styles.navigation}>
+      <View style={[styles.navigation, { paddingBottom: Math.max(16, insets.bottom) }]}>
         <Button
           mode="outlined"
           onPress={goToPreviousQuestion}
@@ -5592,7 +5645,7 @@ export default function InterviewInterface({ navigation, route }: any) {
               ((targetAudienceErrors.has(visibleQuestions[currentQuestionIndex]?.id) || 
                (visibleQuestions[currentQuestionIndex]?.required && 
                 !responses[visibleQuestions[currentQuestionIndex]?.id]) ||
-               (geofencingError && (currentQuestion as any)?.isPollingStationSelection && !locationControlBooster)) ||
+               (geofencingError && (currentQuestion as any)?.isPollingStationSelection && locationControlBooster)) ||
                // Check if polling station is not selected in CAPI mode
                (!isCatiMode && currentQuestion && 
                 (currentQuestion.id === 'polling-station-selection' ||
@@ -5611,7 +5664,7 @@ export default function InterviewInterface({ navigation, route }: any) {
                       // For polling station question, check if both group and station are selected
                       !((currentQuestion as any)?.isPollingStationSelection && 
                         selectedPollingStation.groupName && selectedPollingStation.stationName)) ||
-                     (geofencingError && (currentQuestion as any)?.isPollingStationSelection && !locationControlBooster) ||
+                     (geofencingError && (currentQuestion as any)?.isPollingStationSelection && locationControlBooster) ||
                      // Check if polling station is not selected in CAPI mode
                      (!isCatiMode && currentQuestion && 
                       (currentQuestion.id === 'polling-station-selection' ||
@@ -6322,7 +6375,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 16,
+    // paddingBottom will be set dynamically based on safe area insets
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
     borderTopColor: '#e5e7eb',

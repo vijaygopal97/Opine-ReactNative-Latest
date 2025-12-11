@@ -348,7 +348,8 @@ export default function InterviewerDashboard({ navigation, user, onLogout }: Das
             style={[styles.syncSurveyButton, isOffline && styles.disabledButton]}
             icon="sync"
             buttonColor={isOffline ? "#cccccc" : "#ffffff"}
-            textColor={isOffline ? "#666666" : "#001D48"}
+            textColor={isSyncingSurveys ? "#ffffff" : (isOffline ? "#666666" : "#001D48")}
+            loadingIndicatorColor="#ffffff"
           >
             {isSyncingSurveys ? 'Downloading & Syncing Data...' : 'Sync Survey Details'}
           </Button>

@@ -25,6 +25,7 @@ import {
 } from 'react-native-paper';
 import { apiService } from '../services/api';
 import { findGenderResponse, normalizeGenderResponse } from '../utils/genderUtils';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -72,13 +73,20 @@ export default function ResponseDetailsModal({
   useEffect(() => {
     if (visible && interview) {
       // Load audio if CAPI interview has audio recording
+      // Check for signedUrl first (preferred for S3), then fallback to audioUrl
+      const signedUrl = interview.metadata?.audioRecording?.signedUrl || 
+                       interview.audioRecording?.signedUrl ||
+                       interview.signedUrl;
       const audioUrl = interview.metadata?.audioRecording?.audioUrl || 
                       interview.audioUrl || 
                       interview.audioRecording?.url ||
                       interview.audioRecording?.audioUrl;
       
-      if (interview.interviewMode === 'capi' && audioUrl) {
-        loadAudio(audioUrl).catch((error) => {
+      // Use signedUrl if available, otherwise use audioUrl
+      const audioSource = signedUrl || audioUrl;
+      
+      if (interview.interviewMode === 'capi' && audioSource) {
+        loadAudio(audioSource).catch((error) => {
           // Silently handle error - audio will show "No Recording Found"
           console.error('Audio loading failed:', error);
         });
@@ -151,9 +159,51 @@ export default function ResponseDetailsModal({
         setAudioSound(null);
       }
 
-      // Construct full URL if needed
+      // Check if we have a signed URL (preferred for S3)
       let fullAudioUrl = audioUrl;
-      if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
+      
+      // If it's an S3 key (starts with audio/, documents/, reports/), we need to get a signed URL
+      if (audioUrl && (audioUrl.startsWith('audio/') || audioUrl.startsWith('documents/') || audioUrl.startsWith('reports/')) && 
+          !audioUrl.startsWith('http')) {
+        try {
+          // Check if interview has signedUrl already
+          const signedUrl = interview.metadata?.audioRecording?.signedUrl || 
+                           interview.audioRecording?.signedUrl ||
+                           interview.signedUrl;
+          
+          if (signedUrl) {
+            fullAudioUrl = signedUrl;
+            console.log('Using provided signed URL for audio');
+          } else {
+            // Fetch signed URL from API
+            console.log('Fetching signed URL for S3 key:', audioUrl);
+            const token = await AsyncStorage.getItem('authToken');
+            const API_BASE_URL = 'https://opine.exypnossolutions.com';
+            const response = await fetch(`${API_BASE_URL}/api/survey-responses/audio-signed-url?audioUrl=${encodeURIComponent(audioUrl)}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (data.signedUrl) {
+                fullAudioUrl = data.signedUrl;
+                console.log('Successfully fetched signed URL for audio');
+              } else {
+                throw new Error('No signed URL in response');
+              }
+            } else {
+              throw new Error('Failed to fetch signed URL');
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching signed URL:', error);
+          // Fallback: try to construct URL (may not work for S3)
+          const API_BASE_URL = 'https://opine.exypnossolutions.com';
+          fullAudioUrl = `${API_BASE_URL}${audioUrl.startsWith('/') ? audioUrl : '/' + audioUrl}`;
+        }
+      } else if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
         // If it's a relative URL, prepend the base URL
         const API_BASE_URL = 'https://opine.exypnossolutions.com';
         fullAudioUrl = `${API_BASE_URL}${audioUrl.startsWith('/') ? audioUrl : '/' + audioUrl}`;
@@ -195,12 +245,18 @@ export default function ResponseDetailsModal({
     try {
       if (!audioSound) {
         // Try to get audio URL from various possible locations
+        // Check for signedUrl first (preferred for S3), then fallback to audioUrl
+        const signedUrl = interview.metadata?.audioRecording?.signedUrl || 
+                         interview.audioRecording?.signedUrl ||
+                         interview.signedUrl;
         const audioUrl = interview.metadata?.audioRecording?.audioUrl || 
                         interview.audioUrl || 
                         interview.audioRecording?.url ||
                         interview.audioRecording?.audioUrl;
-        if (audioUrl) {
-          await loadAudio(audioUrl);
+        // Use signedUrl if available, otherwise use audioUrl
+        const audioSource = signedUrl || audioUrl;
+        if (audioSource) {
+          await loadAudio(audioSource);
           // After loading, play it
           if (audioSound) {
             await audioSound.playAsync();

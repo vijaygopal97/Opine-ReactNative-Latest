@@ -165,6 +165,22 @@ class OfflineDataCacheService {
     }
   }
 
+  /**
+   * Get all polling groups for a state (for debugging and fallback searches)
+   */
+  async getAllPollingGroupsForState(state: string): Promise<PollingGroup[]> {
+    try {
+      const allGroups = await this.getAllPollingGroups();
+      const stateKey = `${state}::`;
+      return Object.entries(allGroups)
+        .filter(([key]) => key.startsWith(stateKey))
+        .map(([_, value]) => value);
+    } catch (error) {
+      console.error('Error getting polling groups for state:', error);
+      return [];
+    }
+  }
+
   // ========== Polling Stations Management ==========
   
   async savePollingStations(
@@ -212,6 +228,22 @@ class OfflineDataCacheService {
     } catch (error) {
       console.error('Error getting all polling stations:', error);
       return {};
+    }
+  }
+
+  /**
+   * Get all polling stations for a state and AC (for debugging and fallback searches)
+   */
+  async getAllPollingStationsForAC(state: string, acIdentifier: string): Promise<PollingStation[]> {
+    try {
+      const allStations = await this.getAllPollingStations();
+      const searchKey = `${state}::${acIdentifier}::`;
+      return Object.entries(allStations)
+        .filter(([key]) => key.startsWith(searchKey))
+        .map(([_, value]) => value);
+    } catch (error) {
+      console.error('Error getting polling stations for AC:', error);
+      return [];
     }
   }
 
@@ -573,26 +605,66 @@ class OfflineDataCacheService {
                 await this.savePollingStations(state, normalizedAC, groupName, stationsResult.data);
                 console.log(`✅ Cached polling stations for: ${normalizedAC} - ${groupName}`);
                 
-                // Download GPS for each station (only if explicitly requested, as it's slow)
+                // Save GPS data from stations response (GPS is already included in the response, no need for individual API calls)
                 const stations = stationsResult.data.stations || [];
                 if (stations.length > 0 && includeGPS) {
-                  console.log(`📥 Downloading GPS for ${stations.length} station(s) in ${groupName}...`);
-                  for (const station of stations) {
-                    const stationName = station.stationName || station.name || station;
-                    if (stationName && typeof stationName === 'string') {
-                      try {
-                        const gpsResult = await apiService.getPollingStationGPS(state, normalizedAC, groupName, stationName);
-                        if (gpsResult.success && gpsResult.data) {
-                          await this.savePollingGPS(state, normalizedAC, groupName, stationName, gpsResult.data);
+                  console.log(`💾 Batch saving GPS data for ${stations.length} station(s) in ${groupName}...`);
+                  
+                  // Batch save all GPS data at once for better performance
+                  try {
+                    const allGPS = await this.getAllPollingGPS();
+                    let savedCount = 0;
+                    
+                    for (const station of stations) {
+                      const stationName = station.stationName || station.name || station;
+                      if (stationName && typeof stationName === 'string') {
+                        // GPS data is already in the station object from the API response
+                        if (station.latitude && station.longitude) {
+                          const key = `${state}::${normalizedAC}::${groupName}::${stationName}`;
+                          allGPS[key] = {
+                            gps_location: station.gps_location || station.gpsLocation || null,
+                            latitude: station.latitude,
+                            longitude: station.longitude,
+                            state,
+                            acIdentifier: normalizedAC,
+                            groupName,
+                            stationName,
+                            cachedAt: new Date().toISOString(),
+                          };
+                          savedCount++;
                         }
-                      } catch (gpsError) {
-                        // GPS errors are non-critical, continue
-                        console.warn(`⚠️ Could not download GPS for ${stationName} (non-critical)`);
                       }
                     }
+                    
+                    // Save all GPS data in a single write operation
+                    if (savedCount > 0) {
+                      await AsyncStorage.setItem(STORAGE_KEYS.POLLING_GPS, JSON.stringify(allGPS));
+                      console.log(`✅ Batch saved GPS data for ${savedCount}/${stations.length} station(s) in ${groupName}`);
+                    }
+                  } catch (batchError) {
+                    console.error(`❌ Error batch saving GPS for ${groupName}:`, batchError);
+                    // Fallback to individual saves if batch fails
+                    console.log(`⚠️ Falling back to individual GPS saves for ${groupName}...`);
+                    let savedCount = 0;
+                    for (const station of stations) {
+                      const stationName = station.stationName || station.name || station;
+                      if (stationName && typeof stationName === 'string' && station.latitude && station.longitude) {
+                        try {
+                          await this.savePollingGPS(state, normalizedAC, groupName, stationName, {
+                            gps_location: station.gps_location || station.gpsLocation || null,
+                            latitude: station.latitude,
+                            longitude: station.longitude
+                          });
+                          savedCount++;
+                        } catch (gpsError) {
+                          console.warn(`⚠️ Could not save GPS for ${stationName} (non-critical):`, gpsError);
+                        }
+                      }
+                    }
+                    console.log(`✅ Saved GPS data for ${savedCount}/${stations.length} station(s) in ${groupName} (fallback)`);
                   }
                 } else if (stations.length > 0) {
-                  console.log(`⏭️ Skipping GPS download for ${stations.length} station(s) in ${groupName} (will fetch on-demand)`);
+                  console.log(`⏭️ Skipping GPS save for ${stations.length} station(s) in ${groupName} (will fetch on-demand)`);
                 }
               } else {
                 console.warn(`⚠️ Failed to download stations for ${normalizedAC} - ${groupName}`);
@@ -721,4 +793,5 @@ class OfflineDataCacheService {
 }
 
 export const offlineDataCache = new OfflineDataCacheService();
+
 

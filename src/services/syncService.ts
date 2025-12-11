@@ -275,7 +275,7 @@ class SyncService {
       };
     }
     
-    // Check geofencing - if locationControlBooster is enabled, bypass geofencing
+    // Check geofencing - if locationControlBooster is enabled, geofencing is enforced
     const locationControlBooster = interview.metadata?.locationControlBooster || false;
     const geofencingError = interview.metadata?.geofencingError || null;
     
@@ -378,8 +378,8 @@ class SyncService {
         OldinterviewerID: oldInterviewerID, // Include interviewer ID for target survey
         supervisorID: supervisorID, // Include supervisor ID for target survey
         consentResponse: isConsentNo ? 'no' : null, // Set consentResponse if consent is "No"
-        locationControlBooster: locationControlBooster, // Include booster status for geofencing bypass
-        geofencingError: locationControlBooster ? null : geofencingError, // Clear error if booster enabled
+        locationControlBooster: locationControlBooster, // Include booster status for geofencing enforcement
+        geofencingError: locationControlBooster ? geofencingError : null, // Include error if booster enabled (enforce geofencing)
         // Include audio recording info - audioUrl is already uploaded and available
         audioRecording: interview.audioUri ? {
           hasAudio: true,
@@ -508,4 +508,5 @@ class SyncService {
 }
 
 export const syncService = new SyncService();
+
 

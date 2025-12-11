@@ -842,29 +842,70 @@ class ApiService {
       // Normalize AC name to match master data spelling
       const normalizedAC = this.normalizeACName(acIdentifier);
       
-      // Check offline cache first (lazy import) - try normalized name first
+      // Check offline cache first (lazy import) - try multiple variations
       const cacheForRead = await this.getOfflineCache();
       let cachedData = null;
       if (cacheForRead) {
         try {
+          // Try normalized name first
           cachedData = await cacheForRead.getPollingGroups(state, normalizedAC);
-          // If not found, try original name
-          if (!cachedData) {
+          if (cachedData) {
+            console.log('📦 Using cached polling groups for:', state, normalizedAC, '(normalized)');
+          } else {
+            // If not found, try original name
             cachedData = await cacheForRead.getPollingGroups(state, acIdentifier);
+            if (cachedData) {
+              console.log('📦 Using cached polling groups for:', state, acIdentifier, '(original)');
+            } else {
+              // Try case-insensitive search in all cached groups
+              console.log('🔍 Cache miss for exact match, trying case-insensitive search...');
+              const allGroups = await cacheForRead.getAllPollingGroups();
+              const searchKey = `${state}::`;
+              const lowerAC = acIdentifier.toLowerCase();
+              const lowerNormalized = normalizedAC.toLowerCase();
+              
+              for (const [key, value] of Object.entries(allGroups)) {
+                if (key.startsWith(searchKey)) {
+                  const cachedAC = key.replace(searchKey, '');
+                  const lowerCached = cachedAC.toLowerCase();
+                  // Check if AC matches (case-insensitive)
+                  if (lowerCached === lowerAC || lowerCached === lowerNormalized) {
+                    console.log('📦 Found cached polling groups with case-insensitive match:', key);
+                    cachedData = value as any;
+                    break;
+                  }
+                }
+              }
+            }
           }
         } catch (cacheError) {
-          // Cache read failed, continue
+          console.error('❌ Cache read error:', cacheError);
+          // Continue to try online fetch or return error
         }
       }
+      
       if (cachedData) {
-        console.log('📦 Using cached polling groups for:', state, normalizedAC);
         return { success: true, data: cachedData };
       }
 
       // Check if online
       const isOnline = await this.isOnline();
       if (!isOnline) {
-        console.log('📴 Offline - no cached polling groups for:', state, normalizedAC);
+        console.log('📴 Offline - no cached polling groups found for:', state, acIdentifier, '(normalized:', normalizedAC, ')');
+        // Try one more time with all cached groups to see what's available
+        if (cacheForRead) {
+          try {
+            const allGroups = await cacheForRead.getAllPollingGroups();
+            const availableACs = Object.keys(allGroups)
+              .filter(key => key.startsWith(`${state}::`))
+              .map(key => key.replace(`${state}::`, ''));
+            if (availableACs.length > 0) {
+              console.log('📋 Available cached ACs for', state, ':', availableACs.join(', '));
+            }
+          } catch (e) {
+            // Ignore
+          }
+        }
         return {
           success: false,
           message: 'No internet connection and no cached data available',
@@ -904,7 +945,7 @@ class ApiService {
       console.error('Error response:', error.response?.data);
       console.error('AC Identifier used:', acIdentifier);
       
-      // Try cache as fallback
+      // Try cache as fallback - more aggressive search
       const cacheForFallback = await this.getOfflineCache();
       if (cacheForFallback) {
         try {
@@ -913,12 +954,32 @@ class ApiService {
           if (!cachedData) {
             cachedData = await cacheForFallback.getPollingGroups(state, acIdentifier);
           }
+          if (!cachedData) {
+            // Try case-insensitive search in all cached groups
+            const allGroups = await cacheForFallback.getAllPollingGroups();
+            const searchKey = `${state}::`;
+            const lowerAC = acIdentifier.toLowerCase();
+            const lowerNormalized = normalizedAC.toLowerCase();
+            
+            for (const [key, value] of Object.entries(allGroups)) {
+              if (key.startsWith(searchKey)) {
+                const cachedAC = key.replace(searchKey, '');
+                const lowerCached = cachedAC.toLowerCase();
+                // Check if AC matches (case-insensitive)
+                if (lowerCached === lowerAC || lowerCached === lowerNormalized) {
+                  console.log('📦 Found cached polling groups as fallback with case-insensitive match:', key);
+                  cachedData = value as any;
+                  break;
+                }
+              }
+            }
+          }
           if (cachedData) {
             console.log('📦 Using cached polling groups as fallback for:', state, normalizedAC);
             return { success: true, data: cachedData };
           }
         } catch (cacheError) {
-          // Cache not available
+          console.error('❌ Cache fallback error:', cacheError);
         }
       }
       
@@ -934,29 +995,63 @@ class ApiService {
       // Normalize AC name to match master data spelling
       const normalizedAC = this.normalizeACName(acIdentifier);
       
-      // Check offline cache first (lazy import) - try normalized name first
+      // Check offline cache first (lazy import) - try multiple variations
       const cacheForRead = await this.getOfflineCache();
       let cachedData = null;
       if (cacheForRead) {
         try {
+          // Try normalized name first
           cachedData = await cacheForRead.getPollingStations(state, normalizedAC, groupName);
-          // If not found, try original name
-          if (!cachedData) {
+          if (cachedData) {
+            console.log('📦 Using cached polling stations for:', state, normalizedAC, groupName, '(normalized)');
+          } else {
+            // If not found, try original name
             cachedData = await cacheForRead.getPollingStations(state, acIdentifier, groupName);
+            if (cachedData) {
+              console.log('📦 Using cached polling stations for:', state, acIdentifier, groupName, '(original)');
+            } else {
+              // Try case-insensitive search in all cached stations
+              console.log('🔍 Cache miss for exact match, trying case-insensitive search...');
+              const allStations = await cacheForRead.getAllPollingStations();
+              const searchKey = `${state}::`;
+              const lowerAC = acIdentifier.toLowerCase();
+              const lowerNormalized = normalizedAC.toLowerCase();
+              const lowerGroup = groupName.toLowerCase();
+              
+              for (const [key, value] of Object.entries(allStations)) {
+                if (key.startsWith(searchKey)) {
+                  const parts = key.replace(searchKey, '').split('::');
+                  if (parts.length >= 2) {
+                    const cachedAC = parts[0];
+                    const cachedGroup = parts[1];
+                    const lowerCachedAC = cachedAC.toLowerCase();
+                    const lowerCachedGroup = cachedGroup.toLowerCase();
+                    // Check if AC and group match (case-insensitive)
+                    if ((lowerCachedAC === lowerAC || lowerCachedAC === lowerNormalized) && 
+                        lowerCachedGroup === lowerGroup) {
+                      console.log('📦 Found cached polling stations with case-insensitive match:', key);
+                      cachedData = value as any;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
           }
         } catch (cacheError) {
-          // Cache read failed, continue
+          console.error('❌ Cache read error:', cacheError);
+          // Continue to try online fetch or return error
         }
       }
+      
       if (cachedData) {
-        console.log('📦 Using cached polling stations for:', state, normalizedAC, groupName);
         return { success: true, data: cachedData };
       }
 
       // Check if online
       const isOnline = await this.isOnline();
       if (!isOnline) {
-        console.log('📴 Offline - no cached polling stations for:', state, normalizedAC, groupName);
+        console.log('📴 Offline - no cached polling stations found for:', state, acIdentifier, groupName, '(normalized:', normalizedAC, ')');
         return {
           success: false,
           message: 'No internet connection and no cached data available',
@@ -996,7 +1091,7 @@ class ApiService {
       console.error('Error response:', error.response?.data);
       console.error('AC Identifier used:', acIdentifier);
       
-      // Try cache as fallback
+      // Try cache as fallback - more aggressive search
       const cacheForFallback = await this.getOfflineCache();
       if (cacheForFallback) {
         try {
@@ -1005,12 +1100,39 @@ class ApiService {
           if (!cachedData) {
             cachedData = await cacheForFallback.getPollingStations(state, acIdentifier, groupName);
           }
+          if (!cachedData) {
+            // Try case-insensitive search in all cached stations
+            const allStations = await cacheForFallback.getAllPollingStations();
+            const searchKey = `${state}::`;
+            const lowerAC = acIdentifier.toLowerCase();
+            const lowerNormalized = normalizedAC.toLowerCase();
+            const lowerGroup = groupName.toLowerCase();
+            
+            for (const [key, value] of Object.entries(allStations)) {
+              if (key.startsWith(searchKey)) {
+                const parts = key.replace(searchKey, '').split('::');
+                if (parts.length >= 2) {
+                  const cachedAC = parts[0];
+                  const cachedGroup = parts[1];
+                  const lowerCachedAC = cachedAC.toLowerCase();
+                  const lowerCachedGroup = cachedGroup.toLowerCase();
+                  // Check if AC and group match (case-insensitive)
+                  if ((lowerCachedAC === lowerAC || lowerCachedAC === lowerNormalized) && 
+                      lowerCachedGroup === lowerGroup) {
+                    console.log('📦 Found cached polling stations as fallback with case-insensitive match:', key);
+                    cachedData = value as any;
+                    break;
+                  }
+                }
+              }
+            }
+          }
           if (cachedData) {
             console.log('📦 Using cached polling stations as fallback for:', state, normalizedAC, groupName);
             return { success: true, data: cachedData };
           }
         } catch (cacheError) {
-          // Cache not available
+          console.error('❌ Cache fallback error:', cacheError);
         }
       }
       
